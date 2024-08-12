@@ -3,11 +3,12 @@ mod parser;
 
 use std::io::Write;
 
-use compiler::Compiler;
+use compiler::{encode_leb128, Compiler};
 use parser::parse;
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
+const WASM_IMPORT_SECTION: u8 = 0x2;
 const WASM_FUNCTION_SECTION: u8 = 3;
 const WASM_CODE_SECTION: u8 = 0x0a;
 const WASM_EXPORT_SECTION: u8 = 0x07;
@@ -31,6 +32,12 @@ struct FuncType {
     results: Vec<Type>,
 }
 
+struct FuncImport {
+    module: &'static str,
+    name: &'static str,
+    ty: usize,
+}
+
 struct FuncDef {
     name: &'static str,
     ty: usize,
@@ -43,10 +50,16 @@ fn main() -> std::io::Result<()> {
     f.write_all(b"\0asm")?;
     f.write_all(&WASM_BINARY_VERSION)?;
 
-    let types = [FuncType {
-        params: vec![Type::I32, Type::I32],
-        results: vec![Type::I32],
-    }];
+    let types = [
+        FuncType {
+            params: vec![Type::I32],
+            results: vec![Type::I32],
+        },
+        FuncType {
+            params: vec![Type::I32, Type::I32],
+            results: vec![Type::I32],
+        },
+    ];
 
     let arg = std::env::args()
         .nth(1)
@@ -65,9 +78,15 @@ fn main() -> std::io::Result<()> {
     println!("Disasm: ");
     compiler.disasm(&mut std::io::stdout())?;
 
+    let imports = vec![FuncImport {
+        module: "Math",
+        name: "abs",
+        ty: 0,
+    }];
+
     let funcs = vec![FuncDef {
         name: "hello",
-        ty: 0,
+        ty: 1,
         code: compiler.get_code().to_vec(),
         locals: compiler.get_locals().len(),
         // code: vec![OpCode::I32Const as u8, 0x2B, OpCode::End as u8],
@@ -75,9 +94,15 @@ fn main() -> std::io::Result<()> {
 
     write_section(&mut f, WASM_TYPE_SECTION, &types_section(&types)?)?;
 
+    write_section(&mut f, WASM_IMPORT_SECTION, &import_section(&imports)?)?;
+
     write_section(&mut f, WASM_FUNCTION_SECTION, &functions_section(&funcs)?)?;
 
-    write_section(&mut f, WASM_EXPORT_SECTION, &export_section(&funcs)?)?;
+    write_section(
+        &mut f,
+        WASM_EXPORT_SECTION,
+        &export_section(&funcs, &imports)?,
+    )?;
 
     write_section(&mut f, WASM_CODE_SECTION, &code_section(&funcs)?)?;
 
@@ -110,6 +135,22 @@ fn types_section(types: &[FuncType]) -> std::io::Result<Vec<u8>> {
     }
 
     Ok(types_buf)
+}
+
+fn import_section(funcs: &[FuncImport]) -> std::io::Result<Vec<u8>> {
+    let mut buf: Vec<u8> = vec![];
+    let mut writer = &mut buf;
+
+    encode_leb128(writer, funcs.len() as i32)?;
+
+    for fun in funcs.iter() {
+        write_string(&mut writer, fun.module)?;
+        write_string(&mut writer, fun.name)?;
+        writer.write_all(&[0 as u8])?; // import kind
+        writer.write_all(&[fun.ty as u8])?;
+    }
+
+    Ok(buf)
 }
 
 fn functions_section(funcs: &[FuncDef]) -> std::io::Result<Vec<u8>> {
@@ -154,23 +195,23 @@ fn code_single(fun: &FuncDef) -> std::io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn export_section(funcs: &[FuncDef]) -> std::io::Result<Vec<u8>> {
+fn export_section(funcs: &[FuncDef], imports: &[FuncImport]) -> std::io::Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
     let mut writer = std::io::Cursor::new(&mut buf);
 
-    writer.write_all(&[funcs.len() as u8])?;
+    encode_leb128(&mut writer, funcs.len() as i32)?;
 
     for (i, fun) in funcs.iter().enumerate() {
         write_string(&mut writer, fun.name)?;
-        writer.write_all(&[0 as u8])?; //export kind
-        writer.write_all(&[i as u8])?;
+        encode_leb128(&mut writer, 0)?; //export kind
+        encode_leb128(&mut writer, (i + imports.len()) as i32)?;
     }
 
     Ok(buf)
 }
 
 fn write_string(f: &mut impl Write, s: &str) -> std::io::Result<()> {
-    f.write_all(&[s.len() as u8])?;
+    encode_leb128(f, s.len() as i32)?;
     f.write_all(s.as_bytes())?;
     Ok(())
 }

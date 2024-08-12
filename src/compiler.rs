@@ -4,6 +4,7 @@ use crate::parser::{Expression, Statement};
 
 #[repr(C)]
 pub(crate) enum OpCode {
+    Call = 0x10,
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Const = 0x41,
@@ -51,6 +52,7 @@ impl Compiler {
 
     pub fn disasm(&self, f: &mut impl Write) -> std::io::Result<()> {
         #![allow(non_upper_case_globals)]
+        const Call: u8 = OpCode::Call as u8;
         const LocalGet: u8 = OpCode::LocalGet as u8;
         const LocalSet: u8 = OpCode::LocalSet as u8;
         const I32Const: u8 = OpCode::I32Const as u8;
@@ -63,6 +65,10 @@ impl Compiler {
             cur.read_exact(&mut op_code_buf).unwrap();
             let op_code = op_code_buf[0];
             match op_code {
+                Call => {
+                    let arg = decode_leb128(&mut cur)?;
+                    writeln!(f, "  call {arg}")?;
+                }
                 LocalGet => {
                     let arg = decode_leb128(&mut cur)?;
                     writeln!(f, "  local.get {arg}")?;
@@ -106,6 +112,18 @@ impl Compiler {
                     .enumerate()
                     .find(|(_, local)| local == name)
                     .ok_or_else(|| format!("Variable {name} not found"))?;
+                Ok(ret)
+            }
+            Expression::FnInvoke(_name, arg) => {
+                let arg = self.emit_expr(arg)?;
+                self.code.push(OpCode::LocalGet as u8);
+                encode_leb128(&mut self.code, arg as i32).unwrap();
+                self.code.push(OpCode::Call as u8);
+                encode_leb128(&mut self.code, 0).unwrap();
+                self.code.push(OpCode::LocalSet as u8);
+                let ret = self.locals.len();
+                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
+                self.locals.push("".to_string());
                 Ok(ret)
             }
             Expression::Add(lhs, rhs) => {
@@ -170,7 +188,7 @@ impl Compiler {
     }
 }
 
-fn encode_leb128(f: &mut impl Write, mut value: i32) -> std::io::Result<()> {
+pub(crate) fn encode_leb128(f: &mut impl Write, mut value: i32) -> std::io::Result<()> {
     loop {
         let mut byte = (value & 0x7f) as u8;
         value >>= 7;
@@ -192,7 +210,7 @@ fn test_leb128() {
     assert_eq!(v, vec![0x80, 0x02]);
 }
 
-fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
+pub(crate) fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
     let mut value = 0u32;
     let mut shift = 0;
     loop {

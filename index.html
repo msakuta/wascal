@@ -2,11 +2,17 @@
     <head>
         <script>
 
+const opts = {
+    Math: {
+        abs: x => Math.abs(x),
+    }
+}
+
 window.addEventListener("load", () => {
     const elem = document.getElementById("calculate");
     elem.addEventListener("click", async () => {
         console.log("Calling wasm");
-        const obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"));
+        const obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"), opts);
         const x = parseInt(document.getElementById('x').value);
         const y = parseInt(document.getElementById('y').value);
         const output = document.getElementById('output');

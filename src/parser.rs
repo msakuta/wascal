@@ -2,6 +2,7 @@
 pub enum Expression<'src> {
     Literal(i32),
     Variable(&'src str),
+    FnInvoke(&'src str, Box<Expression<'src>>),
     Add(Box<Expression<'src>>, Box<Expression<'src>>),
     Mul(Box<Expression<'src>>, Box<Expression<'src>>),
 }
@@ -73,9 +74,21 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     if let Ok((r, val)) = num_literal(r) {
         return Ok((r, val));
     }
-    if let Ok((r, val)) = identifier(r) {
-        return Ok((r, Expression::Variable(val)));
+
+    if let Ok((r, name)) = identifier(r) {
+        let r = space(r);
+        if 1 <= r.len() && &r[..1] == "(" {
+            let r = space(&r[1..]);
+            dbg!(&r);
+            let (r, res) = add(r)?;
+            if r.len() < 1 || &r[..1] != ")" {
+                return Err("FnInvoke is not closed".to_string());
+            }
+            return Ok((&r[1..], Expression::FnInvoke(name, Box::new(res))));
+        }
+        return Ok((r, Expression::Variable(name)));
     }
+
     Err("Factor is neither a numeric literal or an identifier".to_string())
 }
 
