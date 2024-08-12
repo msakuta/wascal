@@ -97,12 +97,19 @@ impl Compiler {
                 ret
             }
             Expression::Add(lhs, rhs) => {
-                let lhs = self.emit_expr(lhs);
-                let rhs = self.emit_expr(rhs);
-                self.code
-                    .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
-                self.code
-                    .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
+                if let (Expression::Literal(lhs), Expression::Literal(rhs)) = (&**lhs, &**rhs) {
+                    self.code
+                        .extend_from_slice(&[OpCode::I32Const as u8, *lhs as u8]);
+                    self.code
+                        .extend_from_slice(&[OpCode::I32Const as u8, *rhs as u8]);
+                } else {
+                    let lhs = self.emit_expr(lhs);
+                    let rhs = self.emit_expr(rhs);
+                    self.code
+                        .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
+                    self.code
+                        .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
+                }
                 self.code.push(OpCode::I32Add as u8);
                 self.code
                     .extend_from_slice(&[OpCode::LocalSet as u8, self.locals as u8]);
@@ -111,12 +118,19 @@ impl Compiler {
                 ret
             }
             Expression::Mul(lhs, rhs) => {
-                let lhs = self.emit_expr(lhs);
-                let rhs = self.emit_expr(rhs);
-                self.code
-                    .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
-                self.code
-                    .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
+                if let (Expression::Literal(lhs), Expression::Literal(rhs)) = (&**lhs, &**rhs) {
+                    self.code
+                        .extend_from_slice(&[OpCode::I32Const as u8, *lhs as u8]);
+                    self.code
+                        .extend_from_slice(&[OpCode::I32Const as u8, *rhs as u8]);
+                } else {
+                    let lhs = self.emit_expr(lhs);
+                    let rhs = self.emit_expr(rhs);
+                    self.code
+                        .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
+                    self.code
+                        .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
+                }
                 self.code.push(OpCode::I32Mul as u8);
                 self.code
                     .extend_from_slice(&[OpCode::LocalSet as u8, self.locals as u8]);
