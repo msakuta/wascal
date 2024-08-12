@@ -48,13 +48,15 @@ fn main() -> std::io::Result<()> {
         results: vec![Type::I32],
     }];
 
-    let arg = std::env::args().nth(1).unwrap_or("42+3".to_string());
+    let arg = std::env::args()
+        .nth(1)
+        .unwrap_or("x y => 42 * x + y".to_string());
 
-    let ast = parse(&arg).unwrap();
+    let (params, ast) = parse(&arg).unwrap();
 
     println!("ast: {ast:?}");
 
-    let mut compiler = Compiler::new(vec!["x".to_string(), "y".to_string()]);
+    let mut compiler = Compiler::new(params);
     compiler.compile(&ast);
 
     println!("Disasm: ");

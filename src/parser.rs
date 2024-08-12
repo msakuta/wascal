@@ -36,7 +36,14 @@ fn peek_char(input: &str) -> Option<char> {
     input.chars().next()
 }
 
-fn identifier(mut input: &str) -> Result<(&str, Expression), String> {
+fn space(mut i: &str) -> &str {
+    while peek_char(i).is_some_and(|c| c.is_whitespace()) {
+        i = advance_char(i);
+    }
+    i
+}
+
+fn identifier(mut input: &str) -> Result<(&str, &str), String> {
     let start = input;
     if matches!(peek_char(input), Some(_x @ ('a'..='z' | 'A'..='Z'))) {
         input = advance_char(input);
@@ -48,7 +55,7 @@ fn identifier(mut input: &str) -> Result<(&str, Expression), String> {
         }
         Ok((
             input,
-            Expression::Variable(&start[..(start.len() - input.len())]),
+            &start[..(input.as_ptr() as usize - start.as_ptr() as usize)],
         ))
     } else {
         Err("Invalid identifier".to_string())
@@ -56,14 +63,20 @@ fn identifier(mut input: &str) -> Result<(&str, Expression), String> {
 }
 
 fn factor(i: &str) -> Result<(&str, Expression), String> {
-    if let Ok((r, val)) = num_literal(i) {
+    let r = space(i);
+    if let Ok((r, val)) = num_literal(r) {
         return Ok((r, val));
     }
-    identifier(i)
+    if let Ok((r, val)) = identifier(r) {
+        return Ok((r, Expression::Variable(val)));
+    }
+    Err("Factor is neither a numeric literal or an identifier".to_string())
 }
 
 fn mul(i: &str) -> Result<(&str, Expression), String> {
     let (r, lhs) = factor(i)?;
+
+    let r = space(r);
 
     if 1 <= r.len() && &r[..1] == "*" {
         let (r, rhs) = mul(&r[1..])?;
@@ -76,6 +89,8 @@ fn mul(i: &str) -> Result<(&str, Expression), String> {
 fn add(i: &str) -> Result<(&str, Expression), String> {
     let (r, lhs) = mul(i)?;
 
+    let r = space(r);
+
     if 1 <= r.len() && &r[..1] == "+" {
         let (r, rhs) = add(&r[1..])?;
         Ok((r, Expression::Add(Box::new(lhs), Box::new(rhs))))
@@ -84,7 +99,32 @@ fn add(i: &str) -> Result<(&str, Expression), String> {
     }
 }
 
-pub fn parse(i: &str) -> Result<Expression, String> {
-    let (_, res) = add(i)?;
-    Ok(res)
+fn parse_params(i: &str) -> Result<(&str, Vec<&str>), String> {
+    let mut ret = vec![];
+    let mut r = i;
+
+    loop {
+        r = space(r);
+
+        if &r[..2] == "=>" {
+            r = &r[2..];
+            break;
+        }
+
+        let Ok((next_r, name)) = identifier(r) else {
+            return Err("Parameter list contains non-identifier".to_string());
+        };
+
+        r = next_r;
+
+        ret.push(name);
+    }
+
+    Ok((r, ret))
+}
+
+pub fn parse(i: &str) -> Result<(Vec<String>, Expression), String> {
+    let (r, params) = parse_params(i)?;
+    let (_, ex) = add(r)?;
+    Ok((params.into_iter().map(|s| s.to_string()).collect(), ex))
 }
