@@ -26,16 +26,6 @@ impl Type {
     }
 }
 
-#[repr(C)]
-enum OpCode {
-    I32Const = 0x41,
-    LocalGet = 0x20,
-    LocalSet = 0x21,
-    I32Add = 0x6a,
-    I32Mul = 0x6c,
-    End = 0x0b,
-}
-
 struct FuncType {
     params: Vec<Type>,
     results: Vec<Type>,
@@ -66,6 +56,9 @@ fn main() -> std::io::Result<()> {
 
     let mut compiler = Compiler::new();
     compiler.compile(&ast);
+
+    println!("Disasm: ");
+    compiler.disasm(&mut std::io::stdout())?;
 
     let funcs = vec![FuncDef {
         name: "hello",
