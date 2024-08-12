@@ -4,7 +4,7 @@ mod parser;
 use std::io::Write;
 
 use compiler::Compiler;
-use parser::add;
+use parser::parse;
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
@@ -32,6 +32,7 @@ enum OpCode {
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Add = 0x6a,
+    I32Mul = 0x6c,
     End = 0x0b,
 }
 
@@ -59,7 +60,9 @@ fn main() -> std::io::Result<()> {
 
     let arg = std::env::args().nth(1).unwrap_or("42+3".to_string());
 
-    let (_, ast) = add(&arg).unwrap();
+    let ast = parse(&arg).unwrap();
+
+    println!("ast: {ast:?}");
 
     let mut compiler = Compiler::new();
     compiler.compile(&ast);

@@ -1,7 +1,8 @@
+#[derive(Debug)]
 pub enum Expression {
     Literal(i32),
     Add(Box<Expression>, Box<Expression>),
-    // Mul(Box<Expression>, Box<Expression>),
+    Mul(Box<Expression>, Box<Expression>),
 }
 
 fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
@@ -24,8 +25,19 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
     }
 }
 
-pub fn add(i: &str) -> Result<(&str, Expression), String> {
+fn mul(i: &str) -> Result<(&str, Expression), String> {
     let (r, lhs) = num_literal(i)?;
+
+    if 1 <= r.len() && &r[..1] == "*" {
+        let (r, rhs) = mul(&r[1..])?;
+        Ok((r, Expression::Mul(Box::new(lhs), Box::new(rhs))))
+    } else {
+        Ok((r, lhs))
+    }
+}
+
+fn add(i: &str) -> Result<(&str, Expression), String> {
+    let (r, lhs) = mul(i)?;
 
     if 1 <= r.len() && &r[..1] == "+" {
         let (r, rhs) = add(&r[1..])?;
@@ -33,4 +45,9 @@ pub fn add(i: &str) -> Result<(&str, Expression), String> {
     } else {
         Ok((r, lhs))
     }
+}
+
+pub fn parse(i: &str) -> Result<Expression, String> {
+    let (_, res) = add(i)?;
+    Ok(res)
 }
