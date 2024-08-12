@@ -2,15 +2,27 @@
     <head>
         <script>
 
-(async () => {
-    const obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"));
-    const output = document.getElementById('output');
-    output.innerHTML = obj.instance.exports.hello();
-})();
+window.addEventListener("load", () => {
+    const elem = document.getElementById("calculate");
+    elem.addEventListener("click", async () => {
+        console.log("Calling wasm");
+        const obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"));
+        const x = parseInt(document.getElementById('x').value);
+        const y = parseInt(document.getElementById('y').value);
+        const output = document.getElementById('output');
+        output.innerHTML = obj.instance.exports.hello(x, y);
+    });
+});
+
         </script>
     </head>
     <body>
         <h1>Wascal</h1>
-        <div id="output"></div>
+        <label><input type="text" id="x" value="1"></label>
+        <label><input type="text" id="y" value="2"></label>
+        <p>
+            Output: <span id="output"></span>
+        </p>
+        <button id="calculate">Calculate</button>
     </body>
 </html>

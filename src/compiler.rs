@@ -15,15 +15,15 @@ pub(crate) enum OpCode {
 pub struct Compiler {
     code: Vec<u8>,
     target_stack: usize,
-    locals: usize,
+    locals: Vec<String>,
 }
 
 impl Compiler {
-    pub fn new() -> Self {
+    pub fn new(args: Vec<String>) -> Self {
         Self {
             code: vec![],
             target_stack: 0,
-            locals: 0,
+            locals: args,
         }
     }
 
@@ -39,8 +39,8 @@ impl Compiler {
         &self.code
     }
 
-    pub fn get_locals(&self) -> usize {
-        self.locals
+    pub fn get_locals(&self) -> &[String] {
+        &self.locals
     }
 
     pub fn disasm(&self, f: &mut impl Write) -> std::io::Result<()> {
@@ -87,10 +87,19 @@ impl Compiler {
                 // target_stack.push(());
                 self.code.push(OpCode::I32Const as u8);
                 encode_leb128(&mut self.code, *num).unwrap();
-                self.code
-                    .extend_from_slice(&[OpCode::LocalSet as u8, self.locals as u8]);
-                let ret = self.locals;
-                self.locals += 1;
+                self.code.push(OpCode::LocalSet as u8);
+                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
+                let ret = self.locals.len();
+                self.locals.push("".to_string());
+                ret
+            }
+            Expression::Variable(name) => {
+                let (ret, _) = self
+                    .locals
+                    .iter()
+                    .enumerate()
+                    .find(|(_, local)| local == name)
+                    .unwrap();
                 ret
             }
             Expression::Add(lhs, rhs) => {
@@ -108,10 +117,10 @@ impl Compiler {
                         .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
                 }
                 self.code.push(OpCode::I32Add as u8);
-                self.code
-                    .extend_from_slice(&[OpCode::LocalSet as u8, self.locals as u8]);
-                let ret = self.locals;
-                self.locals += 1;
+                self.code.push(OpCode::LocalSet as u8);
+                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
+                let ret = self.locals.len();
+                self.locals.push("".to_string());
                 ret
             }
             Expression::Mul(lhs, rhs) => {
@@ -129,10 +138,10 @@ impl Compiler {
                         .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
                 }
                 self.code.push(OpCode::I32Mul as u8);
-                self.code
-                    .extend_from_slice(&[OpCode::LocalSet as u8, self.locals as u8]);
-                let ret = self.locals;
-                self.locals += 1;
+                self.code.push(OpCode::LocalSet as u8);
+                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
+                let ret = self.locals.len();
+                self.locals.push("".to_string());
                 ret
             }
         }

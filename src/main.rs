@@ -44,7 +44,7 @@ fn main() -> std::io::Result<()> {
     f.write_all(&WASM_BINARY_VERSION)?;
 
     let types = [FuncType {
-        params: vec![],
+        params: vec![Type::I32, Type::I32],
         results: vec![Type::I32],
     }];
 
@@ -54,7 +54,7 @@ fn main() -> std::io::Result<()> {
 
     println!("ast: {ast:?}");
 
-    let mut compiler = Compiler::new();
+    let mut compiler = Compiler::new(vec!["x".to_string(), "y".to_string()]);
     compiler.compile(&ast);
 
     println!("Disasm: ");
@@ -64,7 +64,7 @@ fn main() -> std::io::Result<()> {
         name: "hello",
         ty: 0,
         code: compiler.get_code().to_vec(),
-        locals: compiler.get_locals(),
+        locals: compiler.get_locals().len(),
         // code: vec![OpCode::I32Const as u8, 0x2B, OpCode::End as u8],
     }];
 
