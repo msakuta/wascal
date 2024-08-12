@@ -63,9 +63,11 @@ fn main() -> std::io::Result<()> {
 
     let arg = std::env::args()
         .nth(1)
-        .unwrap_or("x y => 42 * x + y".to_string());
+        .unwrap_or("scripts/hello.wscl".to_string());
 
-    let stmts = parse(&arg).unwrap();
+    let source = std::fs::read_to_string(arg)?;
+
+    let stmts = parse(&source).unwrap();
 
     println!("ast: {stmts:?}");
 
@@ -127,14 +129,6 @@ fn main() -> std::io::Result<()> {
 
         funcs.push(func);
     }
-
-    let Some(hello_fn) = funcs.iter().find(|f| f.name == "hello") else {
-        println!("Entry point not found");
-        return Ok(());
-    };
-
-    // println!("Disasm: ");
-    // disasm(&code, &mut std::io::stdout())?;
 
     write_section(&mut f, WASM_TYPE_SECTION, &types_section(&types)?)?;
 

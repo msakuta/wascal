@@ -8,15 +8,46 @@ const opts = {
     }
 }
 
+let obj;
+let argElems = [];
+
 window.addEventListener("load", () => {
-    const elem = document.getElementById("calculate");
-    elem.addEventListener("click", async () => {
+    const load = document.getElementById("load");
+    load.addEventListener("click", async () => {
+        console.log("Loading wasm");
+        obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"), opts);
+
+        const params = document.getElementById("params");
+        while (params.firstChild) params.removeChild(params.firstChild);
+        argElems = [];
+
+        if (!obj.instance.exports.hello) {
+            const errorElem = document.createElement("div");
+            errorElem.innerHTML = "Compiled Wasm module does not have function 'hello'";
+            params.appendChild(errorElem);
+            return;
+        }
+
+        for (let i = 0; i < obj.instance.exports.hello.length; i++) {
+            const label = document.createElement("label");
+            const input = document.createElement("input");
+            input.setAttribute("type", "text");
+            input.value = 1;
+            label.appendChild(input);
+            params.appendChild(label);
+            argElems.push(input);
+        }
+    });
+    const call = document.getElementById("call");
+    call.addEventListener("click", async () => {
         console.log("Calling wasm");
-        const obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"), opts);
-        const x = parseInt(document.getElementById('x').value);
-        const y = parseInt(document.getElementById('y').value);
+        let args = [];
+        for (let i = 0; i < obj.instance.exports.hello.length; i++) {
+            const x = parseInt(argElems[i].value);
+            args.push(x);
+        }
         const output = document.getElementById('output');
-        output.innerHTML = obj.instance.exports.hello(x, y);
+        output.innerHTML = obj.instance.exports.hello.call(...args);
     });
 });
 
@@ -24,11 +55,11 @@ window.addEventListener("load", () => {
     </head>
     <body>
         <h1>Wascal</h1>
-        <label><input type="text" id="x" value="1"></label>
-        <label><input type="text" id="y" value="2"></label>
+        <button id="load">Load wasm module</button>
+        <div id="params"></div>
         <p>
             Output: <span id="output"></span>
         </p>
-        <button id="calculate">Calculate</button>
+        <button id="call">Call</button>
     </body>
 </html>
