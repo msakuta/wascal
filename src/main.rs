@@ -57,7 +57,9 @@ fn main() -> std::io::Result<()> {
         results: vec![Type::I32],
     }];
 
-    let (_, ast) = add("42+39").unwrap();
+    let arg = std::env::args().nth(1).unwrap_or("42+3".to_string());
+
+    let (_, ast) = add(&arg).unwrap();
 
     let mut compiler = Compiler::new();
     compiler.compile(&ast);
