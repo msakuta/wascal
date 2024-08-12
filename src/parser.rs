@@ -6,6 +6,12 @@ pub enum Expression<'src> {
     Mul(Box<Expression<'src>>, Box<Expression<'src>>),
 }
 
+#[derive(Debug)]
+pub enum Statement<'src> {
+    VarDecl(&'src str, Expression<'src>),
+    Expr(Expression<'src>),
+}
+
 fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
     let start = input;
     if matches!(
@@ -123,8 +129,39 @@ fn parse_params(i: &str) -> Result<(&str, Vec<&str>), String> {
     Ok((r, ret))
 }
 
-pub fn parse(i: &str) -> Result<(Vec<String>, Expression), String> {
-    let (r, params) = parse_params(i)?;
-    let (_, ex) = add(r)?;
-    Ok((params.into_iter().map(|s| s.to_string()).collect(), ex))
+fn statement(i: &str) -> Result<(&str, Statement), String> {
+    let r = space(i);
+    if 3 < r.len() && &r[..3] == "let" {
+        let r = dbg!(space(&r[3..]));
+        let (r, name) = identifier(r)?;
+        let r = space(r);
+        if r.len() < 1 || &r[..1] != "=" {
+            return Err("Syntax error in var decl".to_string());
+        }
+        let r = &r[1..];
+        let (r, ex) = add(r)?;
+        dbg!(&r);
+        if 1 <= r.len() && &r[..1] == ";" {
+            return Ok((&r[1..], Statement::VarDecl(name, ex)));
+        }
+        return Ok((r, Statement::VarDecl(name, ex)));
+    }
+    let (r, res) = add(r)?;
+
+    let r = space(r);
+
+    if 1 <= r.len() && &r[..1] == ";" {
+        return Ok((&r[1..], Statement::Expr(res)));
+    }
+    return Ok((r, Statement::Expr(res)));
+}
+
+pub fn parse(i: &str) -> Result<(Vec<String>, Vec<Statement>), String> {
+    let (mut r, params) = parse_params(i)?;
+    let mut stmts = vec![];
+    while let Ok(res) = statement(r) {
+        r = res.0;
+        stmts.push(res.1);
+    }
+    Ok((params.into_iter().map(|s| s.to_string()).collect(), stmts))
 }

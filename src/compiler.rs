@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use crate::parser::Expression;
+use crate::parser::{Expression, Statement};
 
 #[repr(C)]
 pub(crate) enum OpCode {
@@ -27,12 +27,18 @@ impl Compiler {
         }
     }
 
-    pub fn compile(&mut self, ast: &Expression) {
+    pub fn compile(&mut self, ast: &[Statement]) -> Result<(), String> {
         // let mut target_stack = vec![];
-        let last = self.emit_expr(ast);
-        self.code
-            .extend_from_slice(&[OpCode::LocalGet as u8, last as u8]);
+        let mut last = None;
+        for stmt in ast {
+            last = Some(self.emit_stmt(stmt)?);
+        }
+        if let Some(last) = last {
+            self.code
+                .extend_from_slice(&[OpCode::LocalGet as u8, last as u8]);
+        }
         self.code.push(OpCode::End as u8);
+        Ok(())
     }
 
     pub fn get_code(&self) -> &[u8] {
@@ -81,7 +87,7 @@ impl Compiler {
         }
     }
 
-    fn emit_expr(&mut self, ast: &Expression) -> usize {
+    fn emit_expr(&mut self, ast: &Expression) -> Result<usize, String> {
         match ast {
             Expression::Literal(num) => {
                 // target_stack.push(());
@@ -91,7 +97,7 @@ impl Compiler {
                 encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
                 let ret = self.locals.len();
                 self.locals.push("".to_string());
-                ret
+                Ok(ret)
             }
             Expression::Variable(name) => {
                 let (ret, _) = self
@@ -99,8 +105,8 @@ impl Compiler {
                     .iter()
                     .enumerate()
                     .find(|(_, local)| local == name)
-                    .unwrap();
-                ret
+                    .ok_or_else(|| format!("Variable {name} not found"))?;
+                Ok(ret)
             }
             Expression::Add(lhs, rhs) => {
                 if let (Expression::Literal(lhs), Expression::Literal(rhs)) = (&**lhs, &**rhs) {
@@ -109,8 +115,8 @@ impl Compiler {
                     self.code.push(OpCode::I32Const as u8);
                     encode_leb128(&mut self.code, *rhs).unwrap();
                 } else {
-                    let lhs = self.emit_expr(lhs);
-                    let rhs = self.emit_expr(rhs);
+                    let lhs = self.emit_expr(lhs)?;
+                    let rhs = self.emit_expr(rhs)?;
                     self.code
                         .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
                     self.code
@@ -121,7 +127,7 @@ impl Compiler {
                 encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
                 let ret = self.locals.len();
                 self.locals.push("".to_string());
-                ret
+                Ok(ret)
             }
             Expression::Mul(lhs, rhs) => {
                 if let (Expression::Literal(lhs), Expression::Literal(rhs)) = (&**lhs, &**rhs) {
@@ -130,8 +136,8 @@ impl Compiler {
                     self.code.push(OpCode::I32Const as u8);
                     encode_leb128(&mut self.code, *rhs).unwrap();
                 } else {
-                    let lhs = self.emit_expr(lhs);
-                    let rhs = self.emit_expr(rhs);
+                    let lhs = self.emit_expr(lhs)?;
+                    let rhs = self.emit_expr(rhs)?;
                     self.code
                         .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
                     self.code
@@ -142,7 +148,23 @@ impl Compiler {
                 encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
                 let ret = self.locals.len();
                 self.locals.push("".to_string());
-                ret
+                Ok(ret)
+            }
+        }
+    }
+
+    fn emit_stmt(&mut self, stmt: &Statement) -> Result<usize, String> {
+        match stmt {
+            Statement::Expr(ex) => self.emit_expr(ex),
+            Statement::VarDecl(name, ex) => {
+                let val = self.emit_expr(ex)?;
+                self.code
+                    .extend_from_slice(&[OpCode::LocalGet as u8, val as u8]);
+                let idx = self.locals.len();
+                self.code.push(OpCode::LocalSet as u8);
+                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
+                self.locals.push(name.to_string());
+                Ok(idx)
             }
         }
     }

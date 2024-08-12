@@ -57,7 +57,10 @@ fn main() -> std::io::Result<()> {
     println!("ast: {ast:?}");
 
     let mut compiler = Compiler::new(params);
-    compiler.compile(&ast);
+    if let Err(e) = compiler.compile(&ast) {
+        println!("Compile error: {e}");
+        return Ok(());
+    }
 
     println!("Disasm: ");
     compiler.disasm(&mut std::io::stdout())?;
