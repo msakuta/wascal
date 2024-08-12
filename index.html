@@ -1,0 +1,14 @@
+<html>
+    <head>
+        <script>
+
+(async () => {
+    const obj = await WebAssembly.instantiateStreaming(fetch("wat.wasm"));
+    console.log(obj.instance.exports.hello());
+})();
+        </script>
+    </head>
+    <body>
+        <div id="clock"></div>
+    </body>
+</html>
