@@ -1,4 +1,10 @@
+mod compiler;
+mod parser;
+
 use std::io::Write;
+
+use compiler::Compiler;
+use parser::add;
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
@@ -8,14 +14,25 @@ const WASM_EXPORT_SECTION: u8 = 0x07;
 
 enum Type {
     I32,
+    I64,
 }
 
 impl Type {
     fn code(&self) -> u8 {
         match self {
             Self::I32 => 0x7f,
+            Self::I64 => 0x7e,
         }
     }
+}
+
+#[repr(C)]
+enum OpCode {
+    I32Const = 0x41,
+    LocalGet = 0x20,
+    LocalSet = 0x21,
+    I32Add = 0x6a,
+    End = 0x0b,
 }
 
 struct FuncType {
@@ -27,6 +44,7 @@ struct FuncDef {
     name: &'static str,
     ty: usize,
     code: Vec<u8>,
+    locals: usize,
 }
 
 fn main() -> std::io::Result<()> {
@@ -39,10 +57,17 @@ fn main() -> std::io::Result<()> {
         results: vec![Type::I32],
     }];
 
+    let (_, ast) = add("42+39").unwrap();
+
+    let mut compiler = Compiler::new();
+    compiler.compile(&ast);
+
     let funcs = vec![FuncDef {
         name: "hello",
         ty: 0,
-        code: vec![0x41, 0x2A, 0x0B],
+        code: compiler.get_code().to_vec(),
+        locals: compiler.get_locals(),
+        // code: vec![OpCode::I32Const as u8, 0x2B, OpCode::End as u8],
     }];
 
     write_section(&mut f, WASM_TYPE_SECTION, &types_section(&types)?)?;
@@ -104,10 +129,24 @@ fn code_section(funcs: &[FuncDef]) -> std::io::Result<Vec<u8>> {
     writer.write_all(&[funcs.len() as u8])?;
 
     for fun in funcs {
-        writer.write_all(&[fun.code.len() as u8 + 1])?;
-        writer.write_all(&[0 as u8])?;
-        writer.write_all(&fun.code)?;
+        let fun_buf = code_single(fun)?;
+        writer.write_all(&[fun_buf.len() as u8])?;
+        writer.write_all(&fun_buf)?;
     }
+
+    Ok(buf)
+}
+
+fn code_single(fun: &FuncDef) -> std::io::Result<Vec<u8>> {
+    let mut buf: Vec<u8> = vec![];
+    let mut writer = std::io::Cursor::new(&mut buf);
+
+    // for _local in 0..fun.locals {
+    writer.write_all(&[1])?; // local decl count
+    writer.write_all(&[fun.locals as u8])?;
+    writer.write_all(&[Type::I32.code()])?;
+    // }
+    writer.write_all(&fun.code)?;
 
     Ok(buf)
 }

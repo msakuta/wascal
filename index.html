@@ -3,7 +3,7 @@
         <script>
 
 (async () => {
-    const obj = await WebAssembly.instantiateStreaming(fetch("wat.wasm"));
+    const obj = await WebAssembly.instantiateStreaming(fetch("wastack.wasm"));
     console.log(obj.instance.exports.hello());
 })();
         </script>
