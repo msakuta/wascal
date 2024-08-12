@@ -9,9 +9,29 @@ pub(crate) enum OpCode {
     LocalSet = 0x21,
     I32Const = 0x41,
     I32Add = 0x6a,
+    I32Sub = 0x6b,
     I32Mul = 0x6c,
+    I32Div = 0x6d,
     End = 0x0b,
 }
+
+macro_rules! impl_op_from {
+    ($($op:ident,)*) => {
+        impl From<u8> for OpCode {
+            #[allow(non_upper_case_globals)]
+            fn from(o: u8) -> Self {
+                $(const $op: u8 = OpCode::$op as u8;)*
+
+                match o {
+                    $($op => Self::$op,)*
+                    _ => panic!("Opcode \"{:02X}\" unrecognized!", o),
+                }
+            }
+        }
+    }
+}
+
+impl_op_from!(Call, LocalGet, LocalSet, I32Const, I32Add, I32Sub, I32Mul, I32Div, End,);
 
 pub struct Compiler {
     code: Vec<u8>,
@@ -51,20 +71,13 @@ impl Compiler {
     }
 
     pub fn disasm(&self, f: &mut impl Write) -> std::io::Result<()> {
-        #![allow(non_upper_case_globals)]
-        const Call: u8 = OpCode::Call as u8;
-        const LocalGet: u8 = OpCode::LocalGet as u8;
-        const LocalSet: u8 = OpCode::LocalSet as u8;
-        const I32Const: u8 = OpCode::I32Const as u8;
-        const I32Add: u8 = OpCode::I32Add as u8;
-        const I32Mul: u8 = OpCode::I32Mul as u8;
-        const End: u8 = OpCode::End as u8;
+        use OpCode::*;
         let mut cur = std::io::Cursor::new(&self.code);
         loop {
             let mut op_code_buf = [0u8];
             cur.read_exact(&mut op_code_buf).unwrap();
             let op_code = op_code_buf[0];
-            match op_code {
+            match OpCode::from(op_code) {
                 Call => {
                     let arg = decode_leb128(&mut cur)?;
                     writeln!(f, "  call {arg}")?;
@@ -84,11 +97,16 @@ impl Compiler {
                 I32Add => {
                     writeln!(f, "  i32.add")?;
                 }
+                I32Sub => {
+                    writeln!(f, "  i32.sub")?;
+                }
                 I32Mul => {
                     writeln!(f, "  i32.mul")?;
                 }
+                I32Div => {
+                    writeln!(f, "  i32.div")?;
+                }
                 End => return Ok(()),
-                _ => panic!("code is broken: unknown opcode {op_code}"),
             }
         }
     }
@@ -126,49 +144,38 @@ impl Compiler {
                 self.locals.push("".to_string());
                 Ok(ret)
             }
-            Expression::Add(lhs, rhs) => {
-                if let (Expression::Literal(lhs), Expression::Literal(rhs)) = (&**lhs, &**rhs) {
-                    self.code.push(OpCode::I32Const as u8);
-                    encode_leb128(&mut self.code, *lhs).unwrap();
-                    self.code.push(OpCode::I32Const as u8);
-                    encode_leb128(&mut self.code, *rhs).unwrap();
-                } else {
-                    let lhs = self.emit_expr(lhs)?;
-                    let rhs = self.emit_expr(rhs)?;
-                    self.code
-                        .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
-                    self.code
-                        .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
-                }
-                self.code.push(OpCode::I32Add as u8);
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
-                let ret = self.locals.len();
-                self.locals.push("".to_string());
-                Ok(ret)
-            }
-            Expression::Mul(lhs, rhs) => {
-                if let (Expression::Literal(lhs), Expression::Literal(rhs)) = (&**lhs, &**rhs) {
-                    self.code.push(OpCode::I32Const as u8);
-                    encode_leb128(&mut self.code, *lhs).unwrap();
-                    self.code.push(OpCode::I32Const as u8);
-                    encode_leb128(&mut self.code, *rhs).unwrap();
-                } else {
-                    let lhs = self.emit_expr(lhs)?;
-                    let rhs = self.emit_expr(rhs)?;
-                    self.code
-                        .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
-                    self.code
-                        .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
-                }
-                self.code.push(OpCode::I32Mul as u8);
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
-                let ret = self.locals.len();
-                self.locals.push("".to_string());
-                Ok(ret)
-            }
+            Expression::Add(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Add),
+            Expression::Sub(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Sub),
+            Expression::Mul(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Mul),
+            Expression::Div(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Div),
         }
+    }
+
+    fn emit_bin_op(
+        &mut self,
+        lhs: &Expression,
+        rhs: &Expression,
+        op: OpCode,
+    ) -> Result<usize, String> {
+        if let (Expression::Literal(lhs), Expression::Literal(rhs)) = (lhs, rhs) {
+            self.code.push(OpCode::I32Const as u8);
+            encode_leb128(&mut self.code, *lhs).unwrap();
+            self.code.push(OpCode::I32Const as u8);
+            encode_leb128(&mut self.code, *rhs).unwrap();
+        } else {
+            let lhs = self.emit_expr(lhs)?;
+            let rhs = self.emit_expr(rhs)?;
+            self.code
+                .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
+            self.code
+                .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
+        }
+        self.code.push(op as u8);
+        self.code.push(OpCode::LocalSet as u8);
+        encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
+        let ret = self.locals.len();
+        self.locals.push("".to_string());
+        Ok(ret)
     }
 
     fn emit_stmt(&mut self, stmt: &Statement) -> Result<usize, String> {

@@ -4,7 +4,9 @@ pub enum Expression<'src> {
     Variable(&'src str),
     FnInvoke(&'src str, Box<Expression<'src>>),
     Add(Box<Expression<'src>>, Box<Expression<'src>>),
+    Sub(Box<Expression<'src>>, Box<Expression<'src>>),
     Mul(Box<Expression<'src>>, Box<Expression<'src>>),
+    Div(Box<Expression<'src>>, Box<Expression<'src>>),
 }
 
 #[derive(Debug)]
@@ -97,9 +99,17 @@ fn mul(i: &str) -> Result<(&str, Expression), String> {
 
     let r = space(r);
 
-    if 1 <= r.len() && &r[..1] == "*" {
+    if 1 <= r.len() && matches!(&r[..1], "*" | "/") {
+        let op = &r[..1];
         let (r, rhs) = mul(&r[1..])?;
-        Ok((r, Expression::Mul(Box::new(lhs), Box::new(rhs))))
+        Ok((
+            r,
+            if op == "*" {
+                Expression::Mul(Box::new(lhs), Box::new(rhs))
+            } else {
+                Expression::Div(Box::new(lhs), Box::new(rhs))
+            },
+        ))
     } else {
         Ok((r, lhs))
     }
@@ -110,9 +120,17 @@ fn add(i: &str) -> Result<(&str, Expression), String> {
 
     let r = space(r);
 
-    if 1 <= r.len() && &r[..1] == "+" {
+    if 1 <= r.len() && matches!(&r[..1], "+" | "-") {
+        let op = &r[..1];
         let (r, rhs) = add(&r[1..])?;
-        Ok((r, Expression::Add(Box::new(lhs), Box::new(rhs))))
+        Ok((
+            r,
+            if op == "+" {
+                Expression::Add(Box::new(lhs), Box::new(rhs))
+            } else {
+                Expression::Sub(Box::new(lhs), Box::new(rhs))
+            },
+        ))
     } else {
         Ok((r, lhs))
     }
