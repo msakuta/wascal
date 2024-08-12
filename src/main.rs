@@ -39,7 +39,7 @@ struct FuncDef {
 }
 
 fn main() -> std::io::Result<()> {
-    let mut f = std::io::BufWriter::new(std::fs::File::create("wastack.wasm")?);
+    let mut f = std::io::BufWriter::new(std::fs::File::create("wascal.wasm")?);
     f.write_all(b"\0asm")?;
     f.write_all(&WASM_BINARY_VERSION)?;
 

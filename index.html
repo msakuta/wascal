@@ -3,12 +3,14 @@
         <script>
 
 (async () => {
-    const obj = await WebAssembly.instantiateStreaming(fetch("wastack.wasm"));
-    console.log(obj.instance.exports.hello());
+    const obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"));
+    const output = document.getElementById('output');
+    output.innerHTML = obj.instance.exports.hello();
 })();
         </script>
     </head>
     <body>
-        <div id="clock"></div>
+        <h1>Wascal</h1>
+        <div id="output"></div>
     </body>
 </html>
