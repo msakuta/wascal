@@ -1,6 +1,9 @@
 use std::io::{Read, Write};
 
-use crate::parser::{Expression, Statement};
+use crate::{
+    parser::{Expression, FnDecl, Statement},
+    FuncDef, FuncImport, FuncType, Type,
+};
 
 #[repr(C)]
 pub(crate) enum OpCode {
@@ -33,18 +36,29 @@ macro_rules! impl_op_from {
 
 impl_op_from!(Call, LocalGet, LocalSet, I32Const, I32Add, I32Sub, I32Mul, I32Div, End,);
 
-pub struct Compiler {
+pub struct Compiler<'a> {
     code: Vec<u8>,
     target_stack: usize,
     locals: Vec<String>,
+    types: &'a mut Vec<FuncType>,
+    imports: &'a [FuncImport],
+    funcs: &'a mut Vec<FuncDef>,
 }
 
-impl Compiler {
-    pub fn new(args: Vec<String>) -> Self {
+impl<'a> Compiler<'a> {
+    pub fn new(
+        args: Vec<String>,
+        types: &'a mut Vec<FuncType>,
+        imports: &'a [FuncImport],
+        funcs: &'a mut Vec<FuncDef>,
+    ) -> Self {
         Self {
             code: vec![],
             target_stack: 0,
             locals: args,
+            types,
+            imports,
+            funcs,
         }
     }
 
@@ -52,7 +66,9 @@ impl Compiler {
         // let mut target_stack = vec![];
         let mut last = None;
         for stmt in ast {
-            last = Some(self.emit_stmt(stmt)?);
+            if let Some(res) = self.emit_stmt(stmt)? {
+                last = Some(res);
+            }
         }
         if let Some(last) = last {
             self.code
@@ -68,47 +84,6 @@ impl Compiler {
 
     pub fn get_locals(&self) -> &[String] {
         &self.locals
-    }
-
-    pub fn disasm(&self, f: &mut impl Write) -> std::io::Result<()> {
-        use OpCode::*;
-        let mut cur = std::io::Cursor::new(&self.code);
-        loop {
-            let mut op_code_buf = [0u8];
-            cur.read_exact(&mut op_code_buf).unwrap();
-            let op_code = op_code_buf[0];
-            match OpCode::from(op_code) {
-                Call => {
-                    let arg = decode_leb128(&mut cur)?;
-                    writeln!(f, "  call {arg}")?;
-                }
-                LocalGet => {
-                    let arg = decode_leb128(&mut cur)?;
-                    writeln!(f, "  local.get {arg}")?;
-                }
-                LocalSet => {
-                    let arg = decode_leb128(&mut cur)?;
-                    writeln!(f, "  local.set {arg}")?;
-                }
-                I32Const => {
-                    let arg = decode_leb128(&mut cur)?;
-                    writeln!(f, "  i32.const {arg}")?;
-                }
-                I32Add => {
-                    writeln!(f, "  i32.add")?;
-                }
-                I32Sub => {
-                    writeln!(f, "  i32.sub")?;
-                }
-                I32Mul => {
-                    writeln!(f, "  i32.mul")?;
-                }
-                I32Div => {
-                    writeln!(f, "  i32.div")?;
-                }
-                End => return Ok(()),
-            }
-        }
     }
 
     fn emit_expr(&mut self, ast: &Expression) -> Result<usize, String> {
@@ -132,12 +107,16 @@ impl Compiler {
                     .ok_or_else(|| format!("Variable {name} not found"))?;
                 Ok(ret)
             }
-            Expression::FnInvoke(_name, arg) => {
+            Expression::FnInvoke(name, arg) => {
+                let Some((i, _)) = self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
+                else {
+                    return Err(format!("Calling undefined function {}", name));
+                };
                 let arg = self.emit_expr(arg)?;
                 self.code.push(OpCode::LocalGet as u8);
                 encode_leb128(&mut self.code, arg as i32).unwrap();
                 self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, 0).unwrap();
+                encode_leb128(&mut self.code, (i + self.imports.len()) as i32).unwrap();
                 self.code.push(OpCode::LocalSet as u8);
                 let ret = self.locals.len();
                 encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
@@ -178,9 +157,9 @@ impl Compiler {
         Ok(ret)
     }
 
-    fn emit_stmt(&mut self, stmt: &Statement) -> Result<usize, String> {
+    fn emit_stmt(&mut self, stmt: &Statement) -> Result<Option<usize>, String> {
         match stmt {
-            Statement::Expr(ex) => self.emit_expr(ex),
+            Statement::Expr(ex) => Ok(Some(self.emit_expr(ex)?)),
             Statement::VarDecl(name, ex) => {
                 let val = self.emit_expr(ex)?;
                 self.code
@@ -189,7 +168,34 @@ impl Compiler {
                 self.code.push(OpCode::LocalSet as u8);
                 encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
                 self.locals.push(name.to_string());
-                Ok(idx)
+                Ok(Some(idx))
+            }
+            Statement::FnDecl(FnDecl {
+                name,
+                params,
+                stmts,
+            }) => {
+                let mut compiler = Compiler::new(
+                    params.iter().map(|v| v.to_string()).collect(),
+                    self.types,
+                    self.imports,
+                    self.funcs,
+                );
+                compiler.compile(stmts)?;
+                let code = compiler.get_code().to_vec();
+                let locals = compiler.get_locals().len();
+                let fn_def = FuncDef {
+                    name: name.to_string(),
+                    ty: self.types.len(),
+                    code,
+                    locals,
+                };
+                self.types.push(FuncType {
+                    params: params.iter().map(|_| Type::I32).collect(),
+                    results: vec![Type::I32],
+                });
+                self.funcs.push(fn_def);
+                Ok(None)
             }
         }
     }
@@ -228,5 +234,46 @@ pub(crate) fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
             return Ok(value as i32);
         }
         shift += 7;
+    }
+}
+
+pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
+    use OpCode::*;
+    let mut cur = std::io::Cursor::new(&code);
+    loop {
+        let mut op_code_buf = [0u8];
+        cur.read_exact(&mut op_code_buf).unwrap();
+        let op_code = op_code_buf[0];
+        match OpCode::from(op_code) {
+            Call => {
+                let arg = decode_leb128(&mut cur)?;
+                writeln!(f, "  call {arg}")?;
+            }
+            LocalGet => {
+                let arg = decode_leb128(&mut cur)?;
+                writeln!(f, "  local.get {arg}")?;
+            }
+            LocalSet => {
+                let arg = decode_leb128(&mut cur)?;
+                writeln!(f, "  local.set {arg}")?;
+            }
+            I32Const => {
+                let arg = decode_leb128(&mut cur)?;
+                writeln!(f, "  i32.const {arg}")?;
+            }
+            I32Add => {
+                writeln!(f, "  i32.add")?;
+            }
+            I32Sub => {
+                writeln!(f, "  i32.sub")?;
+            }
+            I32Mul => {
+                writeln!(f, "  i32.mul")?;
+            }
+            I32Div => {
+                writeln!(f, "  i32.div")?;
+            }
+            End => return Ok(()),
+        }
     }
 }

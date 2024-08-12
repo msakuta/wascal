@@ -13,6 +13,14 @@ pub enum Expression<'src> {
 pub enum Statement<'src> {
     VarDecl(&'src str, Expression<'src>),
     Expr(Expression<'src>),
+    FnDecl(FnDecl<'src>),
+}
+
+#[derive(Debug)]
+pub struct FnDecl<'src> {
+    pub(crate) name: &'src str,
+    pub(crate) params: Vec<&'src str>,
+    pub(crate) stmts: Vec<Statement<'src>>,
 }
 
 fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
@@ -81,7 +89,6 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
         let r = space(r);
         if 1 <= r.len() && &r[..1] == "(" {
             let r = space(&r[1..]);
-            dbg!(&r);
             let (r, res) = add(r)?;
             if r.len() < 1 || &r[..1] != ")" {
                 return Err("FnInvoke is not closed".to_string());
@@ -163,15 +170,56 @@ fn parse_params(i: &str) -> Result<(&str, Vec<&str>), String> {
 fn statement(i: &str) -> Result<(&str, Statement), String> {
     let r = space(i);
     if 3 < r.len() && &r[..3] == "let" {
-        let r = dbg!(space(&r[3..]));
+        let r = space(&r[3..]);
         let (r, name) = identifier(r)?;
+
         let r = space(r);
+
+        if 1 <= r.len() && &r[..1] == "(" {
+            let mut params = vec![];
+
+            let mut r = &r[1..];
+
+            loop {
+                let Ok((next_r, param_name)) = identifier(space(r)) else {
+                    break;
+                };
+                params.push(param_name);
+                r = next_r;
+            }
+
+            let r = space(r);
+
+            if r.len() < 1 || &r[..1] != ")" {
+                return Err(
+                    "Syntax error in func decl: closing parenthesis could not be found".to_string(),
+                );
+            }
+
+            let r = space(&r[1..]);
+
+            if r.len() < 1 || &r[..1] != "=" {
+                return Err("Syntax error in func decl: = could not be found".to_string());
+            }
+
+            let r = &r[1..];
+            let (r, stmts) = statements(r)?;
+
+            return Ok((
+                r,
+                Statement::FnDecl(FnDecl {
+                    name,
+                    params,
+                    stmts,
+                }),
+            ));
+        }
+
         if r.len() < 1 || &r[..1] != "=" {
             return Err("Syntax error in var decl".to_string());
         }
         let r = &r[1..];
         let (r, ex) = add(r)?;
-        dbg!(&r);
         if 1 <= r.len() && &r[..1] == ";" {
             return Ok((&r[1..], Statement::VarDecl(name, ex)));
         }
@@ -187,12 +235,39 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
     return Ok((r, Statement::Expr(res)));
 }
 
-pub fn parse(i: &str) -> Result<(Vec<String>, Vec<Statement>), String> {
-    let (mut r, params) = parse_params(i)?;
+fn statements(r: &str) -> Result<(&str, Vec<Statement>), String> {
+    let mut r = space(r);
+    if 0 < r.len() && &r[..1] == "{" {
+        let mut r = &r[1..];
+
+        let mut stmts = vec![];
+        while let Ok(res) = statement(r) {
+            r = res.0;
+            stmts.push(res.1);
+        }
+
+        let r = space(r);
+
+        if r.len() < 1 || &r[..1] != "}" {
+            return Err("Brace expression is not closed".to_string());
+        }
+
+        return Ok((&r[1..], stmts));
+    }
+
+    let (r, stmt) = statement(r)?;
+
+    Ok((r, vec![stmt]))
+}
+
+pub fn parse(i: &str) -> Result<Vec<Statement>, String> {
+    let mut r = i;
+
     let mut stmts = vec![];
     while let Ok(res) = statement(r) {
         r = res.0;
         stmts.push(res.1);
     }
-    Ok((params.into_iter().map(|s| s.to_string()).collect(), stmts))
+
+    Ok(stmts)
 }
