@@ -7,6 +7,7 @@ pub enum Expression<'src> {
     Sub(Box<Expression<'src>>, Box<Expression<'src>>),
     Mul(Box<Expression<'src>>, Box<Expression<'src>>),
     Div(Box<Expression<'src>>, Box<Expression<'src>>),
+    Lt(Box<Expression<'src>>, Box<Expression<'src>>),
     Conditional(
         Box<Expression<'src>>,
         Vec<Statement<'src>>,
@@ -96,7 +97,7 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
         let r = space(r);
         if 1 <= r.len() && &r[..1] == "(" {
             let r = space(&r[1..]);
-            let (r, res) = add(r)?;
+            let (r, res) = expression(r)?;
             if r.len() < 1 || &r[..1] != ")" {
                 return Err("FnInvoke is not closed".to_string());
             }
@@ -184,6 +185,18 @@ fn recognize<'a>(s: &'a str) -> impl FnOnce(&'a str) -> Result<(&'a str, &'a str
     }
 }
 
+fn cmp_expr(i: &str) -> IResult<&str, Expression> {
+    let (r, lhs) = add(i)?;
+
+    let Ok((r, _)) = recognize("<")(space(r)) else {
+        return Ok((r, lhs));
+    };
+
+    let (r, rhs) = add(r)?;
+
+    Ok((r, Expression::Lt(Box::new(lhs), Box::new(rhs))))
+}
+
 fn else_clause(i: &str) -> IResult<&str, Vec<Statement>> {
     let (r, _) = recognize("else")(space(i))?;
     let (r, _) = recognize("{")(space(r))?;
@@ -195,7 +208,7 @@ fn else_clause(i: &str) -> IResult<&str, Vec<Statement>> {
 fn conditional(i: &str) -> IResult<&str, Expression> {
     let (r, _) = recognize("if")(space(i))?;
 
-    let (r, ex) = add(r)?;
+    let (r, ex) = cmp_expr(r)?;
 
     let (r, _) = recognize("{")(space(r))?;
 
@@ -216,7 +229,7 @@ fn expression(i: &str) -> IResult<&str, Expression> {
         return Ok((r, res));
     }
 
-    if let Ok((r, res)) = add(i) {
+    if let Ok((r, res)) = cmp_expr(i) {
         return Ok((r, res));
     }
 

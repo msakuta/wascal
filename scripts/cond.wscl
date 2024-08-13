@@ -1,1 +1,1 @@
-let hello(x y z) = if x { y } else { z };
+let hello(x y z) = if x < 0 { y } else { z };

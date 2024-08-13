@@ -14,6 +14,8 @@ pub(crate) enum OpCode {
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Const = 0x41,
+    I32Lts = 0x48,
+    I32Ltu = 0x49,
     I32Add = 0x6a,
     I32Sub = 0x6b,
     I32Mul = 0x6c,
@@ -36,7 +38,10 @@ macro_rules! impl_op_from {
     }
 }
 
-impl_op_from!(If, Else, End, Call, LocalGet, LocalSet, I32Const, I32Add, I32Sub, I32Mul, I32Div,);
+impl_op_from!(
+    If, Else, End, Call, LocalGet, LocalSet, I32Const, I32Lts, I32Ltu, I32Add, I32Sub, I32Mul,
+    I32Div,
+);
 
 pub struct Compiler<'a> {
     code: Vec<u8>,
@@ -124,6 +129,7 @@ impl<'a> Compiler<'a> {
             Expression::Sub(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Sub),
             Expression::Mul(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Mul),
             Expression::Div(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Div),
+            Expression::Lt(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Lts),
             Expression::Conditional(cond, t_branch, f_branch) => {
                 let cond = self.emit_expr(cond)?;
                 self.local_get(cond);
@@ -313,6 +319,12 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
             I32Const => {
                 let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "  i32.const {arg}")?;
+            }
+            I32Lts => {
+                writeln!(f, "  i32.lt_s")?;
+            }
+            I32Ltu => {
+                writeln!(f, "  i32.lt_u")?;
             }
             I32Add => {
                 writeln!(f, "  i32.add")?;
