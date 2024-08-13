@@ -1,15 +1,19 @@
 use std::io::{Read, Write};
 
 use crate::{
-    parser::{Expression, FnDecl, Statement},
+    parser::{Expression, FnDecl, For, Statement},
     FuncDef, FuncImport, FuncType, Type,
 };
 
 #[repr(C)]
 pub(crate) enum OpCode {
+    Block = 0x02,
+    Loop = 0x03,
     If = 0x04,
     Else = 0x05,
     End = 0x0b,
+    Br = 0x0c,
+    BrIf = 0x0d,
     Call = 0x10,
     LocalGet = 0x20,
     LocalSet = 0x21,
@@ -39,8 +43,8 @@ macro_rules! impl_op_from {
 }
 
 impl_op_from!(
-    If, Else, End, Call, LocalGet, LocalSet, I32Const, I32Lts, I32Ltu, I32Add, I32Sub, I32Mul,
-    I32Div,
+    Block, Loop, If, Else, End, Br, BrIf, Call, LocalGet, LocalSet, I32Const, I32Lts, I32Ltu,
+    I32Add, I32Sub, I32Mul, I32Div,
 );
 
 pub struct Compiler<'a> {
@@ -200,11 +204,24 @@ impl<'a> Compiler<'a> {
             Statement::Expr(ex) => Ok(Some(self.emit_expr(ex)?)),
             Statement::VarDecl(name, ex) => {
                 let val = self.emit_expr(ex)?;
-                self.code
-                    .extend_from_slice(&[OpCode::LocalGet as u8, val as u8]);
+                self.local_get(val);
                 let idx = self.locals.len();
                 self.code.push(OpCode::LocalSet as u8);
                 encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
+                self.locals.push(name.to_string());
+                Ok(Some(idx))
+            }
+            Statement::VarAssign(name, ex) => {
+                let val = self.emit_expr(ex)?;
+                self.local_get(val);
+                let (idx, _) = self
+                    .locals
+                    .iter()
+                    .enumerate()
+                    .find(|(_, vname)| vname == name)
+                    .ok_or_else(|| format!("Variable {name} not found"))?;
+                self.code.push(OpCode::LocalSet as u8);
+                encode_leb128(&mut self.code, idx as i32).unwrap();
                 self.locals.push(name.to_string());
                 Ok(Some(idx))
             }
@@ -233,6 +250,56 @@ impl<'a> Compiler<'a> {
                     results: vec![Type::I32],
                 });
                 self.funcs.push(fn_def);
+                Ok(None)
+            }
+            Statement::For(For {
+                name,
+                start,
+                end,
+                stmts,
+            }) => {
+                let start = self.emit_expr(start)?;
+                self.local_get(start);
+                let idx = self.locals.len();
+                self.code.push(OpCode::LocalSet as u8);
+                encode_leb128(&mut self.code, idx as i32).unwrap();
+                self.locals.push(name.to_string());
+
+                let end = self.emit_expr(end)?;
+
+                // Start block
+                self.code.push(OpCode::Block as u8);
+                self.code.push(Type::Void.code());
+
+                // Start loop
+                self.code.push(OpCode::Loop as u8);
+                self.code.push(Type::Void.code());
+
+                // End condition
+                self.local_get(end);
+                self.local_get(idx);
+                self.code.push(OpCode::I32Lts as u8);
+                self.code.push(OpCode::BrIf as u8);
+                encode_leb128(&mut self.code, 1).unwrap();
+                self.emit_stmts(stmts)?;
+
+                // Incr idx
+                self.local_get(idx);
+                self.code.push(OpCode::I32Const as u8);
+                encode_leb128(&mut self.code, 1).unwrap();
+                self.code.push(OpCode::I32Add as u8);
+                self.code.push(OpCode::LocalSet as u8);
+                encode_leb128(&mut self.code, idx as i32).unwrap();
+
+                self.code.push(OpCode::Br as u8);
+                encode_leb128(&mut self.code, 0 as i32).unwrap();
+
+                // end loop
+                self.code.push(OpCode::End as u8);
+
+                // end block
+                self.code.push(OpCode::End as u8);
+
                 Ok(None)
             }
         }
@@ -295,6 +362,18 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
         let op_code = op_code_buf[0];
         let indent = "  ".repeat(block_level);
         match OpCode::from(op_code) {
+            Block => {
+                let mut ty = [0u8];
+                cur.read_exact(&mut ty)?;
+                writeln!(f, "{indent}block (result {})", Type::from(ty[0]))?;
+                block_level += 1;
+            }
+            Loop => {
+                let mut ty = [0u8];
+                cur.read_exact(&mut ty)?;
+                writeln!(f, "{indent}loop (result {})", Type::from(ty[0]))?;
+                block_level += 1;
+            }
             If => {
                 let mut ty = [0u8];
                 cur.read_exact(&mut ty)?;
@@ -303,6 +382,16 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
             }
             Else => {
                 writeln!(f, "{indent}else")?;
+            }
+            Br => {
+                let mut label = [0u8];
+                cur.read_exact(&mut label)?;
+                writeln!(f, "{indent}br {}", label[0])?;
+            }
+            BrIf => {
+                let mut label = [0u8];
+                cur.read_exact(&mut label)?;
+                writeln!(f, "{indent}br_if {}", label[0])?;
             }
             Call => {
                 let arg = decode_leb128(&mut cur)?;

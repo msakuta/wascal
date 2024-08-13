@@ -18,14 +18,24 @@ pub enum Expression<'src> {
 #[derive(Debug)]
 pub enum Statement<'src> {
     VarDecl(&'src str, Expression<'src>),
+    VarAssign(&'src str, Expression<'src>),
     Expr(Expression<'src>),
     FnDecl(FnDecl<'src>),
+    For(For<'src>),
 }
 
 #[derive(Debug)]
 pub struct FnDecl<'src> {
     pub(crate) name: &'src str,
     pub(crate) params: Vec<&'src str>,
+    pub(crate) stmts: Vec<Statement<'src>>,
+}
+
+#[derive(Debug)]
+pub struct For<'src> {
+    pub(crate) name: &'src str,
+    pub(crate) start: Expression<'src>,
+    pub(crate) end: Expression<'src>,
     pub(crate) stmts: Vec<Statement<'src>>,
 }
 
@@ -151,7 +161,7 @@ fn add(i: &str) -> Result<(&str, Expression), String> {
     }
 }
 
-fn parse_params(i: &str) -> Result<(&str, Vec<&str>), String> {
+fn _parse_params(i: &str) -> Result<(&str, Vec<&str>), String> {
     let mut ret = vec![];
     let mut r = i;
 
@@ -236,18 +246,49 @@ fn expression(i: &str) -> IResult<&str, Expression> {
     Err("Expression failed to parse".to_string())
 }
 
+fn for_stmt(i: &str) -> IResult<&str, Statement> {
+    let (r, _) = recognize("for")(space(i))?;
+    let (r, name) = identifier(space(r))?;
+    let (r, _) = recognize("in")(space(r))?;
+    let (r, start) = expression(space(r))?;
+    let (r, _) = recognize("to")(space(r))?;
+    let (r, end) = expression(space(r))?;
+    let (r, _) = recognize("{")(space(r))?;
+    let (r, stmts) = statements(space(r))?;
+    let (r, _) = recognize("}")(space(r))?;
+    Ok((
+        r,
+        Statement::For(For {
+            name,
+            start,
+            end,
+            stmts,
+        }),
+    ))
+}
+
+fn var_assign(i: &str) -> IResult<&str, Statement> {
+    let (r, name) = identifier(space(i))?;
+    let (r, _) = recognize("=")(space(r))?;
+    let (r, ex) = expression(space(r))?;
+    if let Ok((r, _)) = recognize(";")(space(r)) {
+        return Ok((r, Statement::VarAssign(name, ex)));
+    }
+    Ok((r, Statement::VarAssign(name, ex)))
+}
+
 fn statement(i: &str) -> Result<(&str, Statement), String> {
     let r = space(i);
-    if 3 < r.len() && &r[..3] == "let" {
-        let r = space(&r[3..]);
-        let (r, name) = identifier(r)?;
 
-        let r = space(r);
+    if let Ok((r, stmt)) = for_stmt(r) {
+        return Ok((r, stmt));
+    }
 
-        if 1 <= r.len() && &r[..1] == "(" {
+    if let Ok((r, _)) = recognize("let")(r) {
+        let (r, name) = identifier(space(r))?;
+
+        if let Ok((mut r, _)) = recognize("(")(space(r)) {
             let mut params = vec![];
-
-            let mut r = &r[1..];
 
             loop {
                 let Ok((next_r, param_name)) = identifier(space(r)) else {
@@ -257,21 +298,16 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
                 r = next_r;
             }
 
-            let r = space(r);
-
-            if r.len() < 1 || &r[..1] != ")" {
+            let Ok((r, _)) = recognize(")")(space(r)) else {
                 return Err(
                     "Syntax error in func decl: closing parenthesis could not be found".to_string(),
                 );
-            }
+            };
 
-            let r = space(&r[1..]);
-
-            if r.len() < 1 || &r[..1] != "=" {
+            let Ok((r, _)) = recognize("=")(space(r)) else {
                 return Err("Syntax error in func decl: = could not be found".to_string());
-            }
+            };
 
-            let r = &r[1..];
             let (r, stmts) = statements(r)?;
 
             return Ok((
@@ -284,23 +320,24 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
             ));
         }
 
-        if r.len() < 1 || &r[..1] != "=" {
+        let Ok((r, _)) = recognize("=")(space(r)) else {
             return Err("Syntax error in var decl".to_string());
-        }
-        let r = &r[1..];
+        };
         let (r, ex) = expression(r)?;
-        if 1 <= r.len() && &r[..1] == ";" {
-            return Ok((&r[1..], Statement::VarDecl(name, ex)));
+        if let Ok((r, _)) = recognize(";")(space(r)) {
+            return Ok((r, Statement::VarDecl(name, ex)));
         }
         return Ok((r, Statement::VarDecl(name, ex)));
     }
 
+    if let Ok((r, stmt)) = var_assign(r) {
+        return Ok((r, stmt));
+    }
+
     let (r, res) = expression(r)?;
 
-    let r = space(r);
-
-    if 1 <= r.len() && &r[..1] == ";" {
-        return Ok((&r[1..], Statement::Expr(res)));
+    if let Ok((r, _)) = recognize(";")(space(r)) {
+        return Ok((r, Statement::Expr(res)));
     }
     return Ok((r, Statement::Expr(res)));
 }
