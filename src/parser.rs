@@ -7,6 +7,11 @@ pub enum Expression<'src> {
     Sub(Box<Expression<'src>>, Box<Expression<'src>>),
     Mul(Box<Expression<'src>>, Box<Expression<'src>>),
     Div(Box<Expression<'src>>, Box<Expression<'src>>),
+    Conditional(
+        Box<Expression<'src>>,
+        Vec<Statement<'src>>,
+        Option<Vec<Statement<'src>>>,
+    ),
 }
 
 #[derive(Debug)]
@@ -22,6 +27,8 @@ pub struct FnDecl<'src> {
     pub(crate) params: Vec<&'src str>,
     pub(crate) stmts: Vec<Statement<'src>>,
 }
+
+type IResult<R, T> = Result<(R, T), String>;
 
 fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
     let start = input;
@@ -167,6 +174,55 @@ fn parse_params(i: &str) -> Result<(&str, Vec<&str>), String> {
     Ok((r, ret))
 }
 
+fn recognize<'a>(s: &'a str) -> impl FnOnce(&'a str) -> Result<(&'a str, &'a str), String> {
+    move |i| {
+        if i.len() < s.len() || &i[..s.len()] != s {
+            return Err(format!("Does not match {s}"));
+        }
+
+        Ok((&i[s.len()..], s))
+    }
+}
+
+fn else_clause(i: &str) -> IResult<&str, Vec<Statement>> {
+    let (r, _) = recognize("else")(space(i))?;
+    let (r, _) = recognize("{")(space(r))?;
+    let (r, stmts) = statements(r)?;
+    let (r, _) = recognize("}")(space(r))?;
+    Ok((r, stmts))
+}
+
+fn conditional(i: &str) -> IResult<&str, Expression> {
+    let (r, _) = recognize("if")(space(i))?;
+
+    let (r, ex) = add(r)?;
+
+    let (r, _) = recognize("{")(space(r))?;
+
+    let (r, stmts) = statements(r)?;
+
+    let (r, _) = recognize("}")(space(r))?;
+    let (r, else_res) = if let Ok((r, res)) = else_clause(r) {
+        (r, Some(res))
+    } else {
+        (r, None)
+    };
+
+    Ok((r, Expression::Conditional(Box::new(ex), stmts, else_res)))
+}
+
+fn expression(i: &str) -> IResult<&str, Expression> {
+    if let Ok((r, res)) = conditional(i) {
+        return Ok((r, res));
+    }
+
+    if let Ok((r, res)) = add(i) {
+        return Ok((r, res));
+    }
+
+    Err("Expression failed to parse".to_string())
+}
+
 fn statement(i: &str) -> Result<(&str, Statement), String> {
     let r = space(i);
     if 3 < r.len() && &r[..3] == "let" {
@@ -219,13 +275,14 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
             return Err("Syntax error in var decl".to_string());
         }
         let r = &r[1..];
-        let (r, ex) = add(r)?;
+        let (r, ex) = expression(r)?;
         if 1 <= r.len() && &r[..1] == ";" {
             return Ok((&r[1..], Statement::VarDecl(name, ex)));
         }
         return Ok((r, Statement::VarDecl(name, ex)));
     }
-    let (r, res) = add(r)?;
+
+    let (r, res) = expression(r)?;
 
     let r = space(r);
 
@@ -236,7 +293,7 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
 }
 
 fn statements(r: &str) -> Result<(&str, Vec<Statement>), String> {
-    let mut r = space(r);
+    let r = space(r);
     if 0 < r.len() && &r[..1] == "{" {
         let mut r = &r[1..];
 

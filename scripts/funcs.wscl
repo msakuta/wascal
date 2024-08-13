@@ -1,3 +1,6 @@
-let t(s) = {let v = s * 2; v * 2}
+let t(s) = {
+    let v = s * 2;
+    v * 2
+}
 
-let hello(x y) = t(x) / y;
+let hello(x y z) = t(x) / y + z;

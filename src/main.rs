@@ -13,9 +13,12 @@ const WASM_FUNCTION_SECTION: u8 = 3;
 const WASM_CODE_SECTION: u8 = 0x0a;
 const WASM_EXPORT_SECTION: u8 = 0x07;
 
+#[derive(Debug)]
 enum Type {
     I32,
     I64,
+    // Pseudo type representing no value
+    Void,
 }
 
 impl Type {
@@ -23,6 +26,28 @@ impl Type {
         match self {
             Self::I32 => 0x7f,
             Self::I64 => 0x7e,
+            Self::Void => 0x40,
+        }
+    }
+}
+
+impl From<u8> for Type {
+    fn from(value: u8) -> Self {
+        match value {
+            0x7f => Self::I32,
+            0x7e => Self::I64,
+            0x40 => Self::Void,
+            _ => panic!("Unknown type"),
+        }
+    }
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::I32 => write!(f, "i32"),
+            Self::I64 => write!(f, "i64"),
+            Self::Void => write!(f, "void"),
         }
     }
 }

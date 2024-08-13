@@ -7,6 +7,9 @@ use crate::{
 
 #[repr(C)]
 pub(crate) enum OpCode {
+    If = 0x04,
+    Else = 0x05,
+    End = 0x0b,
     Call = 0x10,
     LocalGet = 0x20,
     LocalSet = 0x21,
@@ -15,7 +18,6 @@ pub(crate) enum OpCode {
     I32Sub = 0x6b,
     I32Mul = 0x6c,
     I32Div = 0x6d,
-    End = 0x0b,
 }
 
 macro_rules! impl_op_from {
@@ -34,7 +36,7 @@ macro_rules! impl_op_from {
     }
 }
 
-impl_op_from!(Call, LocalGet, LocalSet, I32Const, I32Add, I32Sub, I32Mul, I32Div, End,);
+impl_op_from!(If, Else, End, Call, LocalGet, LocalSet, I32Const, I32Add, I32Sub, I32Mul, I32Div,);
 
 pub struct Compiler<'a> {
     code: Vec<u8>,
@@ -64,12 +66,7 @@ impl<'a> Compiler<'a> {
 
     pub fn compile(&mut self, ast: &[Statement]) -> Result<(), String> {
         // let mut target_stack = vec![];
-        let mut last = None;
-        for stmt in ast {
-            if let Some(res) = self.emit_stmt(stmt)? {
-                last = Some(res);
-            }
-        }
+        let last = self.emit_stmts(ast)?;
         if let Some(last) = last {
             self.code
                 .extend_from_slice(&[OpCode::LocalGet as u8, last as u8]);
@@ -127,7 +124,43 @@ impl<'a> Compiler<'a> {
             Expression::Sub(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Sub),
             Expression::Mul(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Mul),
             Expression::Div(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Div),
+            Expression::Conditional(cond, t_branch, f_branch) => {
+                let cond = self.emit_expr(cond)?;
+                self.local_get(cond);
+                self.code.push(OpCode::If as u8);
+                self.code.push(Type::Void.code());
+
+                let t_branch = self
+                    .emit_stmts(t_branch)?
+                    .ok_or_else(|| "Code in true branch must yield a value".to_string())?;
+                self.local_get(t_branch);
+                let ret = self.locals.len();
+                self.locals.push("".to_string());
+                self.code.push(OpCode::LocalSet as u8);
+                encode_leb128(&mut self.code, ret as i32).unwrap();
+
+                if let Some(f_branch) = f_branch {
+                    self.code.push(OpCode::Else as u8);
+
+                    let f_branch = self
+                        .emit_stmts(f_branch)?
+                        .ok_or_else(|| "Code in false branch must yield a value".to_string())?;
+                    self.local_get(f_branch);
+                    self.locals.push("".to_string());
+                    self.code.push(OpCode::LocalSet as u8);
+                    encode_leb128(&mut self.code, ret as i32).unwrap();
+                }
+
+                self.code.push(OpCode::End as u8);
+
+                Ok(ret)
+            }
         }
+    }
+
+    fn local_get(&mut self, idx: usize) {
+        self.code.push(OpCode::LocalGet as u8);
+        encode_leb128(&mut self.code, idx as i32).unwrap();
     }
 
     fn emit_bin_op(
@@ -199,6 +232,16 @@ impl<'a> Compiler<'a> {
             }
         }
     }
+
+    fn emit_stmts(&mut self, stmts: &[Statement]) -> Result<Option<usize>, String> {
+        let mut last = None;
+        for stmt in stmts {
+            if let Some(res) = self.emit_stmt(stmt)? {
+                last = Some(res);
+            }
+        }
+        Ok(last)
+    }
 }
 
 pub(crate) fn encode_leb128(f: &mut impl Write, mut value: i32) -> std::io::Result<()> {
@@ -240,11 +283,21 @@ pub(crate) fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
 pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
     use OpCode::*;
     let mut cur = std::io::Cursor::new(&code);
+    let mut block_level = 1;
     loop {
         let mut op_code_buf = [0u8];
         cur.read_exact(&mut op_code_buf).unwrap();
         let op_code = op_code_buf[0];
         match OpCode::from(op_code) {
+            If => {
+                let mut ty = [0u8];
+                cur.read_exact(&mut ty)?;
+                writeln!(f, "  if (result {})", Type::from(ty[0]))?;
+                block_level += 1;
+            }
+            Else => {
+                writeln!(f, "  else")?;
+            }
             Call => {
                 let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "  call {arg}")?;
@@ -273,7 +326,13 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
             I32Div => {
                 writeln!(f, "  i32.div")?;
             }
-            End => return Ok(()),
+            End => {
+                writeln!(f, "  end")?;
+                block_level -= 1;
+                if block_level == 0 {
+                    return Ok(());
+                };
+            }
         }
     }
 }
