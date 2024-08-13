@@ -115,8 +115,7 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Calling undefined function {}", name));
                 };
                 let arg = self.emit_expr(arg)?;
-                self.code.push(OpCode::LocalGet as u8);
-                encode_leb128(&mut self.code, arg as i32).unwrap();
+                self.local_get(arg);
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, (i + self.imports.len()) as i32).unwrap();
                 self.code.push(OpCode::LocalSet as u8);
@@ -294,52 +293,53 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
         let mut op_code_buf = [0u8];
         cur.read_exact(&mut op_code_buf).unwrap();
         let op_code = op_code_buf[0];
+        let indent = "  ".repeat(block_level);
         match OpCode::from(op_code) {
             If => {
                 let mut ty = [0u8];
                 cur.read_exact(&mut ty)?;
-                writeln!(f, "  if (result {})", Type::from(ty[0]))?;
+                writeln!(f, "{indent}if (result {})", Type::from(ty[0]))?;
                 block_level += 1;
             }
             Else => {
-                writeln!(f, "  else")?;
+                writeln!(f, "{indent}else")?;
             }
             Call => {
                 let arg = decode_leb128(&mut cur)?;
-                writeln!(f, "  call {arg}")?;
+                writeln!(f, "{indent}call {arg}")?;
             }
             LocalGet => {
                 let arg = decode_leb128(&mut cur)?;
-                writeln!(f, "  local.get {arg}")?;
+                writeln!(f, "{indent}local.get {arg}")?;
             }
             LocalSet => {
                 let arg = decode_leb128(&mut cur)?;
-                writeln!(f, "  local.set {arg}")?;
+                writeln!(f, "{indent}local.set {arg}")?;
             }
             I32Const => {
                 let arg = decode_leb128(&mut cur)?;
-                writeln!(f, "  i32.const {arg}")?;
+                writeln!(f, "{indent}i32.const {arg}")?;
             }
             I32Lts => {
-                writeln!(f, "  i32.lt_s")?;
+                writeln!(f, "{indent}i32.lt_s")?;
             }
             I32Ltu => {
-                writeln!(f, "  i32.lt_u")?;
+                writeln!(f, "{indent}i32.lt_u")?;
             }
             I32Add => {
-                writeln!(f, "  i32.add")?;
+                writeln!(f, "{indent}i32.add")?;
             }
             I32Sub => {
-                writeln!(f, "  i32.sub")?;
+                writeln!(f, "{indent}i32.sub")?;
             }
             I32Mul => {
-                writeln!(f, "  i32.mul")?;
+                writeln!(f, "{indent}i32.mul")?;
             }
             I32Div => {
-                writeln!(f, "  i32.div")?;
+                writeln!(f, "{indent}i32.div")?;
             }
             End => {
-                writeln!(f, "  end")?;
+                writeln!(f, "{indent}end")?;
                 block_level -= 1;
                 if block_level == 0 {
                     return Ok(());

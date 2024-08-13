@@ -119,6 +119,22 @@ fn main() -> std::io::Result<()> {
     println!("func_stmts: {}", func_stmts.len());
 
     for func_stmt in &func_stmts {
+        let ty = types.len();
+        types.push(FuncType {
+            params: func_stmt.params.iter().map(|_| Type::I32).collect(),
+            results: vec![Type::I32],
+        });
+        let func = FuncDef {
+            name: func_stmt.name.to_string(),
+            ty,
+            code: vec![],
+            locals: 0,
+        };
+
+        funcs.push(func);
+    }
+
+    for (i, func_stmt) in func_stmts.iter().enumerate() {
         let mut compiler = Compiler::new(
             func_stmt
                 .params
@@ -137,22 +153,12 @@ fn main() -> std::io::Result<()> {
         let code = compiler.get_code().to_vec();
         let locals = compiler.get_locals().len();
 
-        let ty = types.len();
-        types.push(FuncType {
-            params: func_stmt.params.iter().map(|_| Type::I32).collect(),
-            results: vec![Type::I32],
-        });
-        let func = FuncDef {
-            name: func_stmt.name.to_string(),
-            ty,
-            code,
-            locals,
-        };
+        let func = &mut funcs[i];
+        func.code = code;
+        func.locals = locals;
 
         println!("Disasm {}: ", func.name);
         disasm(&func.code, &mut std::io::stdout())?;
-
-        funcs.push(func);
     }
 
     write_section(&mut f, WASM_TYPE_SECTION, &types_section(&types)?)?;
