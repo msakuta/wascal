@@ -11,6 +11,7 @@ pub enum Expression<'src> {
     Mul(Box<Expression<'src>>, Box<Expression<'src>>),
     Div(Box<Expression<'src>>, Box<Expression<'src>>),
     Lt(Box<Expression<'src>>, Box<Expression<'src>>),
+    Gt(Box<Expression<'src>>, Box<Expression<'src>>),
     Conditional(
         Box<Expression<'src>>,
         Vec<Statement<'src>>,
@@ -220,17 +221,29 @@ fn recognize<'a>(s: &'a str) -> impl FnOnce(&'a str) -> Result<(&'a str, &'a str
 fn cmp_expr(i: &str) -> IResult<&str, Expression> {
     let (r, lhs) = add(i)?;
 
-    let Ok((r, _)) = recognize("<")(space(r)) else {
+    let Ok((r, op)) = recognize("<")(space(r)).or_else(|_| recognize(">")(space(r))) else {
         return Ok((r, lhs));
     };
 
     let (r, rhs) = add(r)?;
 
-    Ok((r, Expression::Lt(Box::new(lhs), Box::new(rhs))))
+    Ok((
+        r,
+        if op == "<" {
+            Expression::Lt(Box::new(lhs), Box::new(rhs))
+        } else {
+            Expression::Gt(Box::new(lhs), Box::new(rhs))
+        },
+    ))
 }
 
 fn else_clause(i: &str) -> IResult<&str, Vec<Statement>> {
     let (r, _) = recognize("else")(space(i))?;
+
+    if let Ok((r, next_cond)) = conditional(r) {
+        return Ok((r, vec![Statement::Expr(next_cond)]));
+    }
+
     let (r, _) = recognize("{")(space(r))?;
     let (r, stmts) = statements(r)?;
     let (r, _) = recognize("}")(space(r))?;

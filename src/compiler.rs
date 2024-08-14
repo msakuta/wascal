@@ -22,10 +22,16 @@ pub(crate) enum OpCode {
     F64Const = 0x44,
     I32LtS = 0x48,
     I32LtU = 0x49,
+    I32GtS = 0x4a,
+    I32GtU = 0x4b,
     I64LtS = 0x53,
     I64LtU = 0x54,
+    I64GtS = 0x55,
+    I64GtU = 0x56,
     F32Lt = 0x5d,
+    F32Gt = 0x5e,
     F64Lt = 0x63,
+    F64Gt = 0x64,
     I32Add = 0x6a,
     I32Sub = 0x6b,
     I32Mul = 0x6c,
@@ -72,9 +78,27 @@ macro_rules! impl_op_from {
 impl_op_from!(
     Block: "block", Loop: "loop", If: "if", Else: "else", End: "end", Br: "br", BrIf: "br_if", Call: "call", Drop: "drop",
     LocalGet: "local.get", LocalSet: "local.set", I32Const: "i32.const", F64Const: "f64.const",
-    I32LtS: "i32.lt_s", I32LtU: "i32.lt_u", I64LtS: "i64.lt_s", I64LtU: "i64.lt_u", F32Lt: "f32.lt",
-    F64Lt: "f64.lt", I32Add: "i32.add", I32Sub: "i32.sub", I32Mul: "i32.mul", I32DivS: "i32.div_s", I64Add: "i64.add", I64Sub: "i64.sub",
-    I64Mul: "i64.mul", I64DivS: "i64.div_s", F32Add: "f32.add", F32Sub: "f32.sub", F32Mul: "f32.mul", F32Div: "f32.div",
+    I32LtS: "i32.lt_s",
+    I32LtU: "i32.lt_u",
+    I32GtS: "i32.gt_s",
+    I32GtU: "i32.gt_u",
+    I64LtS: "i64.lt_s",
+    I64LtU: "i64.lt_u",
+    I64GtS: "i64.gt_s",
+    I64GtU: "i64.gt_u",
+    F32Lt: "f32.lt",
+    F32Gt: "f32.gt",
+    F64Lt: "f64.lt",
+    F64Gt: "f64.gt",
+    I32Add: "i32.add",
+    I32Sub: "i32.sub",
+    I32Mul: "i32.mul",
+    I32DivS: "i32.div_s",
+    I64Add: "i64.add",
+    I64Sub: "i64.sub",
+    I64Mul: "i64.mul",
+    I64DivS: "i64.div_s",
+    F32Add: "f32.add", F32Sub: "f32.sub", F32Mul: "f32.mul", F32Div: "f32.div",
     F64Add: "f64.add", F64Sub: "f64.sub", F64Mul: "f64.mul", F64Div: "f64.div",
 );
 
@@ -229,6 +253,17 @@ impl<'a> Compiler<'a> {
                     i64: OpCode::I64LtS,
                     f32: OpCode::F32Lt,
                     f64: OpCode::F64Lt,
+                },
+            ),
+            Expression::Gt(lhs, rhs) => self.emit_bin_op(
+                lhs,
+                rhs,
+                "gt",
+                TypeMap {
+                    i32: OpCode::I32GtS,
+                    i64: OpCode::I64GtS,
+                    f32: OpCode::F32Gt,
+                    f64: OpCode::F64Gt,
                 },
             ),
             Expression::Conditional(cond, t_branch, f_branch) => {
@@ -510,9 +545,10 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let arg = f64::from_le_bytes(buf);
                 writeln!(f, "{indent}f64.const {arg}")?;
             }
-            I32LtS | I32LtU | I32Add | I32Sub | I32Mul | I32DivS | I64LtS | I64LtU | I64Add
-            | I64Sub | I64Mul | I64DivS | F32Lt | F32Add | F32Sub | F32Mul | F32Div | F64Lt
-            | F64Add | F64Sub | F64Mul | F64Div => {
+            I32LtS | I32LtU | I32GtS | I32GtU | I32Add | I32Sub | I32Mul | I32DivS | I64LtS
+            | I64LtU | I64GtS | I64GtU | I64Add | I64Sub | I64Mul | I64DivS | F32Lt | F32Gt
+            | F32Add | F32Sub | F32Mul | F32Div | F64Lt | F64Gt | F64Add | F64Sub | F64Mul
+            | F64Div => {
                 writeln!(f, "{indent}{}", code.to_name())?;
             }
             End => {
