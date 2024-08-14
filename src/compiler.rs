@@ -152,13 +152,11 @@ impl<'a> Compiler<'a> {
     fn emit_expr(&mut self, ast: &Expression) -> Result<Type, String> {
         match ast {
             Expression::LiteralI32(num) => {
-                // target_stack.push(());
                 self.code.push(OpCode::I32Const as u8);
-                encode_leb128(&mut self.code, *num).unwrap();
+                encode_sleb128(&mut self.code, *num).unwrap();
                 Ok(Type::I32)
             }
             Expression::LiteralF64(num) => {
-                // target_stack.push(());
                 self.code.push(OpCode::F64Const as u8);
                 self.code.write_all(&num.to_le_bytes()).unwrap();
                 Ok(Type::F64)
@@ -464,6 +462,32 @@ fn test_leb128() {
     assert_eq!(v, vec![0x80, 0x02]);
 }
 
+pub(crate) fn encode_sleb128(f: &mut impl Write, mut value: i32) -> std::io::Result<()> {
+    let mut more = true;
+    while more {
+        let mut byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if (value == 0 && byte & 0x40 == 0) || (value == -1 && byte & 0x40 != 0) {
+            more = false;
+        } else {
+            byte |= 0x80;
+        }
+        f.write_all(&[byte])?;
+    }
+    return Ok(());
+}
+
+#[test]
+fn test_sleb128() {
+    let mut v = vec![];
+    encode_sleb128(&mut v, -123456).unwrap();
+    assert_eq!(v, vec![0xc0, 0xbb, 0x78]);
+    assert_eq!(
+        decode_sleb128(&mut std::io::Cursor::new(&v)).unwrap(),
+        -123456
+    );
+}
+
 pub(crate) fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
     let mut value = 0u32;
     let mut shift = 0;
@@ -476,6 +500,24 @@ pub(crate) fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
         }
         shift += 7;
     }
+}
+
+pub(crate) fn decode_sleb128(f: &mut impl Read) -> std::io::Result<i32> {
+    let mut value = 0u32;
+    let mut shift = 0;
+    let mut byte = [0u8];
+    loop {
+        f.read_exact(&mut byte)?;
+        value |= ((byte[0] & 0x7f) as u32) << shift;
+        shift += 7;
+        if byte[0] & 0x80 == 0 {
+            break;
+        }
+    }
+    if shift < std::mem::size_of::<i32>() * 8 && byte[0] & 0x40 != 0 {
+        value |= !0 << shift;
+    }
+    return Ok(value as i32);
 }
 
 pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
@@ -536,7 +578,7 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 writeln!(f, "{indent}local.set {arg}")?;
             }
             I32Const => {
-                let arg = decode_leb128(&mut cur)?;
+                let arg = decode_sleb128(&mut cur)?;
                 writeln!(f, "{indent}i32.const {arg}")?;
             }
             F64Const => {
