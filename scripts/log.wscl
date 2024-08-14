@@ -1,0 +1,4 @@
+let hello(x) = {
+    log(x + 42);
+    42
+}
