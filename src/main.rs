@@ -105,7 +105,7 @@ fn main() -> std::io::Result<()> {
             module: "output",
             name: "putc",
             ty: 0,
-        }
+        },
     ];
 
     let mut funcs = vec![];

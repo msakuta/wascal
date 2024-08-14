@@ -279,6 +279,7 @@ impl<'a> Compiler<'a> {
 
                 Ok(false)
             }
+            Statement::Brace(stmts) => self.emit_stmts(stmts),
         }
     }
 

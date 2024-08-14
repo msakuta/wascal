@@ -22,6 +22,7 @@ pub enum Statement<'src> {
     Expr(Expression<'src>),
     FnDecl(FnDecl<'src>),
     For(For<'src>),
+    Brace(Vec<Statement<'src>>),
 }
 
 #[derive(Debug)]
@@ -280,6 +281,10 @@ fn var_assign(i: &str) -> IResult<&str, Statement> {
 fn statement(i: &str) -> Result<(&str, Statement), String> {
     let r = space(i);
 
+    if let Ok((r, stmts)) = brace_statement(r) {
+        return Ok((r, Statement::Brace(stmts)));
+    }
+
     if let Ok((r, stmt)) = for_stmt(r) {
         return Ok((r, stmt));
     }
@@ -342,29 +347,22 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
     return Ok((r, Statement::Expr(res)));
 }
 
-fn statements(r: &str) -> Result<(&str, Vec<Statement>), String> {
-    let r = space(r);
-    if 0 < r.len() && &r[..1] == "{" {
-        let mut r = &r[1..];
+fn brace_statement(i: &str) -> IResult<&str, Vec<Statement>> {
+    let (r, _) = recognize("{")(space(i))?;
+    let (r, stmts) = statements(r)?;
+    let (r, _) = recognize("}")(space(r))?;
 
-        let mut stmts = vec![];
-        while let Ok(res) = statement(r) {
-            r = res.0;
-            stmts.push(res.1);
-        }
+    Ok((r, stmts))
+}
 
-        let r = space(r);
-
-        if r.len() < 1 || &r[..1] != "}" {
-            return Err("Brace expression is not closed".to_string());
-        }
-
-        return Ok((&r[1..], stmts));
+fn statements(mut r: &str) -> Result<(&str, Vec<Statement>), String> {
+    let mut stmts = vec![];
+    while let Ok(res) = statement(r) {
+        r = res.0;
+        stmts.push(res.1);
     }
 
-    let (r, stmt) = statement(r)?;
-
-    Ok((r, vec![stmt]))
+    Ok((r, stmts))
 }
 
 pub fn parse(i: &str) -> Result<Vec<Statement>, String> {
