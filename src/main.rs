@@ -75,16 +75,10 @@ fn main() -> std::io::Result<()> {
     f.write_all(b"\0asm")?;
     f.write_all(&WASM_BINARY_VERSION)?;
 
-    let mut types = vec![
-        FuncType {
-            params: vec![Type::I32],
-            results: vec![Type::I32],
-        },
-        FuncType {
-            params: vec![Type::I32, Type::I32],
-            results: vec![Type::I32],
-        },
-    ];
+    let mut types = vec![FuncType {
+        params: vec![Type::I32],
+        results: vec![Type::I32],
+    }];
 
     let arg = std::env::args()
         .nth(1)
@@ -96,11 +90,18 @@ fn main() -> std::io::Result<()> {
 
     println!("ast: {stmts:?}");
 
-    let imports = vec![FuncImport {
-        module: "Math",
-        name: "abs",
-        ty: 0,
-    }];
+    let imports = vec![
+        FuncImport {
+            module: "Math",
+            name: "abs",
+            ty: 0,
+        },
+        FuncImport {
+            module: "console",
+            name: "log",
+            ty: 0,
+        },
+    ];
 
     let mut funcs = vec![];
 

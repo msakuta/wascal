@@ -15,6 +15,7 @@ pub(crate) enum OpCode {
     Br = 0x0c,
     BrIf = 0x0d,
     Call = 0x10,
+    Drop = 0x1a,
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Const = 0x41,
@@ -43,7 +44,7 @@ macro_rules! impl_op_from {
 }
 
 impl_op_from!(
-    Block, Loop, If, Else, End, Br, BrIf, Call, LocalGet, LocalSet, I32Const, I32Lts, I32Ltu,
+    Block, Loop, If, Else, End, Br, BrIf, Call, Drop, LocalGet, LocalSet, I32Const, I32Lts, I32Ltu,
     I32Add, I32Sub, I32Mul, I32Div,
 );
 
@@ -73,11 +74,11 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub fn compile(&mut self, ast: &[Statement]) -> Result<(), String> {
+    pub fn compile(&mut self, ast: &[Statement]) -> Result<bool, String> {
         // let mut target_stack = vec![];
         let last = self.emit_stmts(ast)?;
         self.code.push(OpCode::End as u8);
-        Ok(())
+        Ok(last)
     }
 
     pub fn get_code(&self) -> &[u8] {
@@ -108,14 +109,25 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
             Expression::FnInvoke(name, arg) => {
-                let Some((i, _)) = self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
-                else {
+                let idx;
+                if let Some((i, _)) = self
+                    .imports
+                    .iter()
+                    .enumerate()
+                    .find(|(_, f)| f.name == *name)
+                {
+                    idx = i;
+                } else if let Some((i, _)) =
+                    self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
+                {
+                    idx = i + self.imports.len();
+                } else {
                     return Err(format!("Calling undefined function {}", name));
                 };
                 // We assume functions take exactly 1 argument and 1 return value.
                 self.emit_expr(arg)?;
                 self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, (i + self.imports.len()) as i32).unwrap();
+                encode_leb128(&mut self.code, idx as i32).unwrap();
                 Ok(())
             }
             Expression::Add(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Add),
@@ -273,6 +285,9 @@ impl<'a> Compiler<'a> {
     fn emit_stmts(&mut self, stmts: &[Statement]) -> Result<bool, String> {
         let mut has_value = false;
         for stmt in stmts {
+            if has_value {
+                self.code.push(OpCode::Drop as u8);
+            }
             has_value = self.emit_stmt(stmt)?;
         }
         Ok(has_value)
@@ -367,6 +382,9 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
             Call => {
                 let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}call {arg}")?;
+            }
+            Drop => {
+                writeln!(f, "{indent}drop")?;
             }
             LocalGet => {
                 let arg = decode_leb128(&mut cur)?;
