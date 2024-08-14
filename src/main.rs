@@ -101,6 +101,11 @@ fn main() -> std::io::Result<()> {
             name: "log",
             ty: 0,
         },
+        FuncImport {
+            module: "output",
+            name: "putc",
+            ty: 0,
+        }
     ];
 
     let mut funcs = vec![];
