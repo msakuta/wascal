@@ -132,7 +132,13 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
         return Ok((r, val));
     }
 
-    let Ok((r, name)) = identifier(space(r)) else {
+    if let Ok((r, _)) = recognize("(")(r) {
+        let (r, ex) = expression(r)?;
+        let (r, _) = recognize(")")(r)?;
+        return Ok((r, ex));
+    }
+
+    let Ok((r, name)) = identifier(r) else {
         return Err("Factor is neither a numeric literal or an identifier".to_string());
     };
 
