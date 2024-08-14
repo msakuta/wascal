@@ -76,10 +76,6 @@ impl<'a> Compiler<'a> {
     pub fn compile(&mut self, ast: &[Statement]) -> Result<(), String> {
         // let mut target_stack = vec![];
         let last = self.emit_stmts(ast)?;
-        if let Some(last) = last {
-            self.code
-                .extend_from_slice(&[OpCode::LocalGet as u8, last as u8]);
-        }
         self.code.push(OpCode::End as u8);
         Ok(())
     }
@@ -92,17 +88,14 @@ impl<'a> Compiler<'a> {
         &self.locals
     }
 
-    fn emit_expr(&mut self, ast: &Expression) -> Result<usize, String> {
+    /// Emit expression code. It produces exactly one value onto the stack, so we don't need to return index
+    fn emit_expr(&mut self, ast: &Expression) -> Result<(), String> {
         match ast {
             Expression::Literal(num) => {
                 // target_stack.push(());
                 self.code.push(OpCode::I32Const as u8);
                 encode_leb128(&mut self.code, *num).unwrap();
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
-                let ret = self.locals.len();
-                self.locals.push("".to_string());
-                Ok(ret)
+                Ok(())
             }
             Expression::Variable(name) => {
                 let (ret, _) = self
@@ -111,22 +104,19 @@ impl<'a> Compiler<'a> {
                     .enumerate()
                     .find(|(_, local)| local == name)
                     .ok_or_else(|| format!("Variable {name} not found"))?;
-                Ok(ret)
+                self.local_get(ret);
+                Ok(())
             }
             Expression::FnInvoke(name, arg) => {
                 let Some((i, _)) = self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
                 else {
                     return Err(format!("Calling undefined function {}", name));
                 };
-                let arg = self.emit_expr(arg)?;
-                self.local_get(arg);
+                // We assume functions take exactly 1 argument and 1 return value.
+                self.emit_expr(arg)?;
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, (i + self.imports.len()) as i32).unwrap();
-                self.code.push(OpCode::LocalSet as u8);
-                let ret = self.locals.len();
-                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
-                self.locals.push("".to_string());
-                Ok(ret)
+                Ok(())
             }
             Expression::Add(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Add),
             Expression::Sub(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Sub),
@@ -134,35 +124,30 @@ impl<'a> Compiler<'a> {
             Expression::Div(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Div),
             Expression::Lt(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Lts),
             Expression::Conditional(cond, t_branch, f_branch) => {
-                let cond = self.emit_expr(cond)?;
-                self.local_get(cond);
+                self.emit_expr(cond)?;
                 self.code.push(OpCode::If as u8);
+                let ty_fixup = self.code.len();
                 self.code.push(Type::Void.code());
 
-                let t_branch = self
-                    .emit_stmts(t_branch)?
-                    .ok_or_else(|| "Code in true branch must yield a value".to_string())?;
-                self.local_get(t_branch);
-                let ret = self.locals.len();
-                self.locals.push("".to_string());
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, ret as i32).unwrap();
+                let t_branch = self.emit_stmts(t_branch)?;
+
+                if t_branch {
+                    self.code[ty_fixup] = Type::I32.code();
+                }
 
                 if let Some(f_branch) = f_branch {
                     self.code.push(OpCode::Else as u8);
 
-                    let f_branch = self
-                        .emit_stmts(f_branch)?
-                        .ok_or_else(|| "Code in false branch must yield a value".to_string())?;
-                    self.local_get(f_branch);
-                    self.locals.push("".to_string());
-                    self.code.push(OpCode::LocalSet as u8);
-                    encode_leb128(&mut self.code, ret as i32).unwrap();
+                    if !self.emit_stmts(f_branch)? {
+                        return Err("True branch with yielded value requires false branch to yield a value too".to_string());
+                    }
+                } else if t_branch {
+                    return Err("True branch with yielded value requires false branch".to_string());
                 }
 
                 self.code.push(OpCode::End as u8);
 
-                Ok(ret)
+                Ok(())
             }
         }
     }
@@ -177,43 +162,27 @@ impl<'a> Compiler<'a> {
         lhs: &Expression,
         rhs: &Expression,
         op: OpCode,
-    ) -> Result<usize, String> {
-        if let (Expression::Literal(lhs), Expression::Literal(rhs)) = (lhs, rhs) {
-            self.code.push(OpCode::I32Const as u8);
-            encode_leb128(&mut self.code, *lhs).unwrap();
-            self.code.push(OpCode::I32Const as u8);
-            encode_leb128(&mut self.code, *rhs).unwrap();
-        } else {
-            let lhs = self.emit_expr(lhs)?;
-            let rhs = self.emit_expr(rhs)?;
-            self.code
-                .extend_from_slice(&[OpCode::LocalGet as u8, lhs as u8]);
-            self.code
-                .extend_from_slice(&[OpCode::LocalGet as u8, rhs as u8]);
-        }
+    ) -> Result<(), String> {
+        self.emit_expr(lhs)?;
+        self.emit_expr(rhs)?;
         self.code.push(op as u8);
-        self.code.push(OpCode::LocalSet as u8);
-        encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
-        let ret = self.locals.len();
-        self.locals.push("".to_string());
-        Ok(ret)
+        Ok(())
     }
 
-    fn emit_stmt(&mut self, stmt: &Statement) -> Result<Option<usize>, String> {
+    /// Returns if a value is pushed to the stack
+    fn emit_stmt(&mut self, stmt: &Statement) -> Result<bool, String> {
         match stmt {
-            Statement::Expr(ex) => Ok(Some(self.emit_expr(ex)?)),
+            Statement::Expr(ex) => {
+                self.emit_expr(ex)?;
+                Ok(true)
+            }
             Statement::VarDecl(name, ex) => {
-                let val = self.emit_expr(ex)?;
-                self.local_get(val);
-                let idx = self.locals.len();
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, self.locals.len() as i32).unwrap();
-                self.locals.push(name.to_string());
-                Ok(Some(idx))
+                self.emit_expr(ex)?;
+                self.add_local(*name);
+                Ok(false)
             }
             Statement::VarAssign(name, ex) => {
-                let val = self.emit_expr(ex)?;
-                self.local_get(val);
+                self.emit_expr(ex)?;
                 let (idx, _) = self
                     .locals
                     .iter()
@@ -222,8 +191,7 @@ impl<'a> Compiler<'a> {
                     .ok_or_else(|| format!("Variable {name} not found"))?;
                 self.code.push(OpCode::LocalSet as u8);
                 encode_leb128(&mut self.code, idx as i32).unwrap();
-                self.locals.push(name.to_string());
-                Ok(Some(idx))
+                Ok(false)
             }
             Statement::FnDecl(FnDecl {
                 name,
@@ -250,7 +218,7 @@ impl<'a> Compiler<'a> {
                     results: vec![Type::I32],
                 });
                 self.funcs.push(fn_def);
-                Ok(None)
+                Ok(false)
             }
             Statement::For(For {
                 name,
@@ -258,14 +226,11 @@ impl<'a> Compiler<'a> {
                 end,
                 stmts,
             }) => {
-                let start = self.emit_expr(start)?;
-                self.local_get(start);
-                let idx = self.locals.len();
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, idx as i32).unwrap();
-                self.locals.push(name.to_string());
+                self.emit_expr(start)?;
+                let idx = self.add_local(*name);
 
-                let end = self.emit_expr(end)?;
+                self.emit_expr(end)?;
+                let end = self.add_local("");
 
                 // Start block
                 self.code.push(OpCode::Block as u8);
@@ -300,19 +265,25 @@ impl<'a> Compiler<'a> {
                 // end block
                 self.code.push(OpCode::End as u8);
 
-                Ok(None)
+                Ok(false)
             }
         }
     }
 
-    fn emit_stmts(&mut self, stmts: &[Statement]) -> Result<Option<usize>, String> {
-        let mut last = None;
+    fn emit_stmts(&mut self, stmts: &[Statement]) -> Result<bool, String> {
+        let mut has_value = false;
         for stmt in stmts {
-            if let Some(res) = self.emit_stmt(stmt)? {
-                last = Some(res);
-            }
+            has_value = self.emit_stmt(stmt)?;
         }
-        Ok(last)
+        Ok(has_value)
+    }
+
+    fn add_local(&mut self, name: impl Into<String>) -> usize {
+        let ret = self.locals.len();
+        self.code.push(OpCode::LocalSet as u8);
+        encode_leb128(&mut self.code, ret as i32).unwrap();
+        self.locals.push(name.into());
+        ret
     }
 }
 
