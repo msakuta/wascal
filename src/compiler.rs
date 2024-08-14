@@ -1,11 +1,11 @@
 use std::io::{Read, Write};
 
 use crate::{
-    parser::{Expression, FnDecl, For, Statement},
+    parser::{Expression, FnDecl, For, Statement, VarDecl},
     FuncDef, FuncImport, FuncType, Type,
 };
 
-#[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum OpCode {
     Block = 0x02,
     Loop = 0x03,
@@ -19,16 +19,33 @@ pub(crate) enum OpCode {
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Const = 0x41,
-    I32Lts = 0x48,
-    I32Ltu = 0x49,
+    F64Const = 0x44,
+    I32LtS = 0x48,
+    I32LtU = 0x49,
+    I64LtS = 0x53,
+    I64LtU = 0x54,
+    F32Lt = 0x5d,
+    F64Lt = 0x63,
     I32Add = 0x6a,
     I32Sub = 0x6b,
     I32Mul = 0x6c,
-    I32Div = 0x6d,
+    I32DivS = 0x6d,
+    I64Add = 0x7c,
+    I64Sub = 0x7d,
+    I64Mul = 0x7e,
+    I64DivS = 0x7f,
+    F32Add = 0x92,
+    F32Sub = 0x93,
+    F32Mul = 0x94,
+    F32Div = 0x95,
+    F64Add = 0xa0,
+    F64Sub = 0xa1,
+    F64Mul = 0xa2,
+    F64Div = 0xa3,
 }
 
 macro_rules! impl_op_from {
-    ($($op:ident,)*) => {
+    ($($op:ident : $nam:literal,)*) => {
         impl From<u8> for OpCode {
             #[allow(non_upper_case_globals)]
             fn from(o: u8) -> Self {
@@ -40,18 +57,37 @@ macro_rules! impl_op_from {
                 }
             }
         }
+
+        impl OpCode {
+            fn to_name(&self) -> &str {
+                use OpCode::*;
+                match self {
+                    $($op => $nam,)*
+                }
+            }
+        }
     }
 }
 
 impl_op_from!(
-    Block, Loop, If, Else, End, Br, BrIf, Call, Drop, LocalGet, LocalSet, I32Const, I32Lts, I32Ltu,
-    I32Add, I32Sub, I32Mul, I32Div,
+    Block: "block", Loop: "loop", If: "if", Else: "else", End: "end", Br: "br", BrIf: "br_if", Call: "call", Drop: "drop",
+    LocalGet: "local.get", LocalSet: "local.set", I32Const: "i32.const", F64Const: "f64.const",
+    I32LtS: "i32.lt_s", I32LtU: "i32.lt_u", I64LtS: "i64.lt_s", I64LtU: "i64.lt_u", F32Lt: "f32.lt",
+    F64Lt: "f64.lt", I32Add: "i32.add", I32Sub: "i32.sub", I32Mul: "i32.mul", I32DivS: "i32.div_s", I64Add: "i64.add", I64Sub: "i64.sub",
+    I64Mul: "i64.mul", I64DivS: "i64.div_s", F32Add: "f32.add", F32Sub: "f32.sub", F32Mul: "f32.mul", F32Div: "f32.div",
+    F64Add: "f64.add", F64Sub: "f64.sub", F64Mul: "f64.mul", F64Div: "f64.div",
 );
+
+struct TypeMap {
+    i32: OpCode,
+    i64: OpCode,
+    f32: OpCode,
+    f64: OpCode,
+}
 
 pub struct Compiler<'a> {
     code: Vec<u8>,
-    target_stack: usize,
-    locals: Vec<String>,
+    locals: Vec<VarDecl>,
     types: &'a mut Vec<FuncType>,
     imports: &'a [FuncImport],
     funcs: &'a mut Vec<FuncDef>,
@@ -59,14 +95,13 @@ pub struct Compiler<'a> {
 
 impl<'a> Compiler<'a> {
     pub fn new(
-        args: Vec<String>,
+        args: Vec<VarDecl>,
         types: &'a mut Vec<FuncType>,
         imports: &'a [FuncImport],
         funcs: &'a mut Vec<FuncDef>,
     ) -> Self {
         Self {
             code: vec![],
-            target_stack: 0,
             locals: args,
             types,
             imports,
@@ -85,42 +120,52 @@ impl<'a> Compiler<'a> {
         &self.code
     }
 
-    pub fn get_locals(&self) -> &[String] {
+    pub fn get_locals(&self) -> &[VarDecl] {
         &self.locals
     }
 
     /// Emit expression code. It produces exactly one value onto the stack, so we don't need to return index
-    fn emit_expr(&mut self, ast: &Expression) -> Result<(), String> {
+    fn emit_expr(&mut self, ast: &Expression) -> Result<Type, String> {
         match ast {
-            Expression::Literal(num) => {
+            Expression::LiteralI32(num) => {
                 // target_stack.push(());
                 self.code.push(OpCode::I32Const as u8);
                 encode_leb128(&mut self.code, *num).unwrap();
-                Ok(())
+                Ok(Type::I32)
+            }
+            Expression::LiteralF64(num) => {
+                // target_stack.push(());
+                self.code.push(OpCode::F64Const as u8);
+                self.code.write_all(&num.to_le_bytes()).unwrap();
+                Ok(Type::F64)
             }
             Expression::Variable(name) => {
-                let (ret, _) = self
+                let (ret, local) = self
                     .locals
                     .iter()
                     .enumerate()
-                    .find(|(_, local)| local == name)
+                    .find(|(_, local)| &local.name == name)
                     .ok_or_else(|| format!("Variable {name} not found"))?;
+                let ty = local.ty;
                 self.local_get(ret);
-                Ok(())
+                Ok(ty)
             }
             Expression::FnInvoke(name, arg) => {
                 let idx;
-                if let Some((i, _)) = self
+                let fn_ty;
+                if let Some((i, import)) = self
                     .imports
                     .iter()
                     .enumerate()
                     .find(|(_, f)| f.name == *name)
                 {
                     idx = i;
-                } else if let Some((i, _)) =
+                    fn_ty = import.ty;
+                } else if let Some((i, func)) =
                     self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
                 {
                     idx = i + self.imports.len();
+                    fn_ty = func.ty;
                 } else {
                     return Err(format!("Calling undefined function {}", name));
                 };
@@ -128,13 +173,64 @@ impl<'a> Compiler<'a> {
                 self.emit_expr(arg)?;
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, idx as i32).unwrap();
-                Ok(())
+                let fn_ty = &self.types[fn_ty];
+                Ok(fn_ty.results[0])
             }
-            Expression::Add(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Add),
-            Expression::Sub(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Sub),
-            Expression::Mul(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Mul),
-            Expression::Div(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Div),
-            Expression::Lt(lhs, rhs) => self.emit_bin_op(lhs, rhs, OpCode::I32Lts),
+            Expression::Add(lhs, rhs) => self.emit_bin_op(
+                lhs,
+                rhs,
+                "add",
+                TypeMap {
+                    i32: OpCode::I32Add,
+                    i64: OpCode::I64Add,
+                    f32: OpCode::F32Add,
+                    f64: OpCode::F64Add,
+                },
+            ),
+            Expression::Sub(lhs, rhs) => self.emit_bin_op(
+                lhs,
+                rhs,
+                "sub",
+                TypeMap {
+                    i32: OpCode::I32Sub,
+                    i64: OpCode::I64Sub,
+                    f32: OpCode::F32Sub,
+                    f64: OpCode::F64Sub,
+                },
+            ),
+            Expression::Mul(lhs, rhs) => self.emit_bin_op(
+                lhs,
+                rhs,
+                "mul",
+                TypeMap {
+                    i32: OpCode::I32Mul,
+                    i64: OpCode::I64Mul,
+                    f32: OpCode::F32Mul,
+                    f64: OpCode::F64Mul,
+                },
+            ),
+            Expression::Div(lhs, rhs) => self.emit_bin_op(
+                lhs,
+                rhs,
+                "div",
+                TypeMap {
+                    i32: OpCode::I32DivS,
+                    i64: OpCode::I64DivS,
+                    f32: OpCode::F32Div,
+                    f64: OpCode::F64Div,
+                },
+            ),
+            Expression::Lt(lhs, rhs) => self.emit_bin_op(
+                lhs,
+                rhs,
+                "lt",
+                TypeMap {
+                    i32: OpCode::I32LtS,
+                    i64: OpCode::I64LtS,
+                    f32: OpCode::F32Lt,
+                    f64: OpCode::F64Lt,
+                },
+            ),
             Expression::Conditional(cond, t_branch, f_branch) => {
                 self.emit_expr(cond)?;
                 self.code.push(OpCode::If as u8);
@@ -159,7 +255,7 @@ impl<'a> Compiler<'a> {
 
                 self.code.push(OpCode::End as u8);
 
-                Ok(())
+                Ok(Type::I32)
             }
         }
     }
@@ -173,12 +269,20 @@ impl<'a> Compiler<'a> {
         &mut self,
         lhs: &Expression,
         rhs: &Expression,
-        op: OpCode,
-    ) -> Result<(), String> {
-        self.emit_expr(lhs)?;
-        self.emit_expr(rhs)?;
+        name: &str,
+        ty_map: TypeMap,
+    ) -> Result<Type, String> {
+        let lhs = self.emit_expr(lhs)?;
+        let rhs = self.emit_expr(rhs)?;
+        let op = match (lhs, rhs) {
+            (Type::I32, Type::I32) => ty_map.i32,
+            (Type::I64, Type::I64) => ty_map.i64,
+            (Type::F32, Type::F32) => ty_map.f32,
+            (Type::F64, Type::F64) => ty_map.f64,
+            _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
+        };
         self.code.push(op as u8);
-        Ok(())
+        Ok(lhs)
     }
 
     /// Returns if a value is pushed to the stack
@@ -189,8 +293,8 @@ impl<'a> Compiler<'a> {
                 Ok(true)
             }
             Statement::VarDecl(name, ex) => {
-                self.emit_expr(ex)?;
-                self.add_local(*name);
+                let ty = self.emit_expr(ex)?;
+                self.add_local(*name, ty);
                 Ok(false)
             }
             Statement::VarAssign(name, ex) => {
@@ -199,7 +303,7 @@ impl<'a> Compiler<'a> {
                     .locals
                     .iter()
                     .enumerate()
-                    .find(|(_, vname)| vname == name)
+                    .find(|(_, local)| &local.name == name)
                     .ok_or_else(|| format!("Variable {name} not found"))?;
                 self.code.push(OpCode::LocalSet as u8);
                 encode_leb128(&mut self.code, idx as i32).unwrap();
@@ -209,16 +313,13 @@ impl<'a> Compiler<'a> {
                 name,
                 params,
                 stmts,
+                ret_ty,
             }) => {
-                let mut compiler = Compiler::new(
-                    params.iter().map(|v| v.to_string()).collect(),
-                    self.types,
-                    self.imports,
-                    self.funcs,
-                );
+                let mut compiler =
+                    Compiler::new(params.clone(), self.types, self.imports, self.funcs);
                 compiler.compile(stmts)?;
                 let code = compiler.get_code().to_vec();
-                let locals = compiler.get_locals().len();
+                let locals = compiler.get_locals().to_vec();
                 let fn_def = FuncDef {
                     name: name.to_string(),
                     ty: self.types.len(),
@@ -227,7 +328,7 @@ impl<'a> Compiler<'a> {
                 };
                 self.types.push(FuncType {
                     params: params.iter().map(|_| Type::I32).collect(),
-                    results: vec![Type::I32],
+                    results: vec![*ret_ty],
                 });
                 self.funcs.push(fn_def);
                 Ok(false)
@@ -238,11 +339,11 @@ impl<'a> Compiler<'a> {
                 end,
                 stmts,
             }) => {
-                self.emit_expr(start)?;
-                let idx = self.add_local(*name);
+                let start_ty = self.emit_expr(start)?;
+                let idx = self.add_local(*name, start_ty);
 
-                self.emit_expr(end)?;
-                let end = self.add_local("");
+                let end_ty = self.emit_expr(end)?;
+                let end = self.add_local("", end_ty);
 
                 // Start block
                 self.code.push(OpCode::Block as u8);
@@ -255,7 +356,7 @@ impl<'a> Compiler<'a> {
                 // End condition
                 self.local_get(end);
                 self.local_get(idx);
-                self.code.push(OpCode::I32Lts as u8);
+                self.code.push(OpCode::I32LtS as u8);
                 self.code.push(OpCode::BrIf as u8);
                 encode_leb128(&mut self.code, 1).unwrap();
                 self.emit_stmts(stmts)?;
@@ -294,11 +395,14 @@ impl<'a> Compiler<'a> {
         Ok(has_value)
     }
 
-    fn add_local(&mut self, name: impl Into<String>) -> usize {
+    fn add_local(&mut self, name: impl Into<String>, ty: Type) -> usize {
         let ret = self.locals.len();
         self.code.push(OpCode::LocalSet as u8);
         encode_leb128(&mut self.code, ret as i32).unwrap();
-        self.locals.push(name.into());
+        self.locals.push(VarDecl {
+            name: name.into(),
+            ty,
+        });
         ret
     }
 }
@@ -341,14 +445,15 @@ pub(crate) fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
 
 pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
     use OpCode::*;
-    let mut cur = std::io::Cursor::new(&code);
+    let mut cur = std::io::Cursor::new(code);
     let mut block_level = 1;
     loop {
         let mut op_code_buf = [0u8];
-        cur.read_exact(&mut op_code_buf).unwrap();
+        cur.read_exact(&mut op_code_buf)?;
         let op_code = op_code_buf[0];
         let indent = "  ".repeat(block_level);
-        match OpCode::from(op_code) {
+        let code = OpCode::from(op_code);
+        match code {
             Block => {
                 let mut ty = [0u8];
                 cur.read_exact(&mut ty)?;
@@ -399,23 +504,16 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}i32.const {arg}")?;
             }
-            I32Lts => {
-                writeln!(f, "{indent}i32.lt_s")?;
+            F64Const => {
+                let mut buf = [0u8; std::mem::size_of::<f64>()];
+                cur.read_exact(&mut buf)?;
+                let arg = f64::from_le_bytes(buf);
+                writeln!(f, "{indent}f64.const {arg}")?;
             }
-            I32Ltu => {
-                writeln!(f, "{indent}i32.lt_u")?;
-            }
-            I32Add => {
-                writeln!(f, "{indent}i32.add")?;
-            }
-            I32Sub => {
-                writeln!(f, "{indent}i32.sub")?;
-            }
-            I32Mul => {
-                writeln!(f, "{indent}i32.mul")?;
-            }
-            I32Div => {
-                writeln!(f, "{indent}i32.div")?;
+            I32LtS | I32LtU | I32Add | I32Sub | I32Mul | I32DivS | I64LtS | I64LtU | I64Add
+            | I64Sub | I64Mul | I64DivS | F32Lt | F32Add | F32Sub | F32Mul | F32Div | F64Lt
+            | F64Add | F64Sub | F64Mul | F64Div => {
+                writeln!(f, "{indent}{}", code.to_name())?;
             }
             End => {
                 writeln!(f, "{indent}end")?;

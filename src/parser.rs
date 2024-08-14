@@ -1,6 +1,9 @@
+use crate::Type;
+
 #[derive(Debug)]
 pub enum Expression<'src> {
-    Literal(i32),
+    LiteralI32(i32),
+    LiteralF64(f64),
     Variable(&'src str),
     FnInvoke(&'src str, Box<Expression<'src>>),
     Add(Box<Expression<'src>>, Box<Expression<'src>>),
@@ -28,8 +31,18 @@ pub enum Statement<'src> {
 #[derive(Debug)]
 pub struct FnDecl<'src> {
     pub(crate) name: &'src str,
-    pub(crate) params: Vec<&'src str>,
+    pub(crate) params: Vec<VarDecl>,
     pub(crate) stmts: Vec<Statement<'src>>,
+    pub(crate) ret_ty: Type,
+}
+
+/// Variable declaration with associated type.
+/// Since WebAssembly is strict about type, we need to keep track of type for each slot
+/// in function arguments and local variables.
+#[derive(Debug, Clone)]
+pub struct VarDecl {
+    pub(crate) name: String,
+    pub(crate) ty: Type,
 }
 
 #[derive(Debug)]
@@ -53,10 +66,14 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
             chars.next();
             input = chars.as_str();
         }
-        let num = start[..(start.len() - input.len())]
-            .parse::<i32>()
-            .map_err(|s| s.to_string())?;
-        Ok((input, Expression::Literal(num)))
+        let slice = &start[..(start.len() - input.len())];
+        if slice.contains('.') {
+            let num = slice.parse::<f64>().map_err(|s| s.to_string())?;
+            Ok((input, Expression::LiteralF64(num)))
+        } else {
+            let num = slice.parse::<i32>().map_err(|s| s.to_string())?;
+            Ok((input, Expression::LiteralI32(num)))
+        }
     } else {
         Err("Not a number".to_string())
     }
@@ -98,26 +115,30 @@ fn identifier(mut input: &str) -> Result<(&str, &str), String> {
     }
 }
 
+fn fn_call<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Expression<'a>> {
+    let (r, _) = recognize("(")(space(i))?;
+    let (r, res) = expression(r)?;
+    let Ok((r, _)) = recognize(")")(r) else {
+        return Err("FnInvoke is not closed".to_string());
+    };
+    return Ok((r, Expression::FnInvoke(name, Box::new(res))));
+}
+
 fn factor(i: &str) -> Result<(&str, Expression), String> {
     let r = space(i);
     if let Ok((r, val)) = num_literal(r) {
         return Ok((r, val));
     }
 
-    if let Ok((r, name)) = identifier(r) {
-        let r = space(r);
-        if 1 <= r.len() && &r[..1] == "(" {
-            let r = space(&r[1..]);
-            let (r, res) = expression(r)?;
-            if r.len() < 1 || &r[..1] != ")" {
-                return Err("FnInvoke is not closed".to_string());
-            }
-            return Ok((&r[1..], Expression::FnInvoke(name, Box::new(res))));
-        }
-        return Ok((r, Expression::Variable(name)));
+    let Ok((r, name)) = identifier(space(r)) else {
+        return Err("Factor is neither a numeric literal or an identifier".to_string());
+    };
+
+    if let Ok((r, ex)) = fn_call(name, r) {
+        return Ok((r, ex));
     }
 
-    Err("Factor is neither a numeric literal or an identifier".to_string())
+    return Ok((r, Expression::Variable(name)));
 }
 
 fn mul(i: &str) -> Result<(&str, Expression), String> {
@@ -278,6 +299,34 @@ fn var_assign(i: &str) -> IResult<&str, Statement> {
     Ok((r, Statement::VarAssign(name, ex)))
 }
 
+fn param_ty(i: &str) -> IResult<&str, Type> {
+    let (r, _) = recognize(":")(space(i))?;
+    let (r, ty) = identifier(space(r))?;
+    Ok((r, ty.try_into()?))
+}
+
+fn fn_param(i: &str) -> IResult<&str, VarDecl> {
+    let (r, param_name) = identifier(space(i))?;
+    let (r, ty) = if let Ok((r, ty)) = param_ty(space(r)) {
+        (r, ty)
+    } else {
+        (r, Type::I32)
+    };
+    Ok((
+        r,
+        VarDecl {
+            name: param_name.to_string(),
+            ty,
+        },
+    ))
+}
+
+fn fn_ret_ty(i: &str) -> IResult<&str, Type> {
+    let (r, _) = recognize("->")(space(i))?;
+    let (r, ty) = identifier(space(r))?;
+    Ok((r, ty.try_into()?))
+}
+
 fn statement(i: &str) -> Result<(&str, Statement), String> {
     let r = space(i);
 
@@ -296,10 +345,14 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
             let mut params = vec![];
 
             loop {
-                let Ok((next_r, param_name)) = identifier(space(r)) else {
+                let Ok((next_r, param)) = fn_param(r) else {
                     break;
                 };
-                params.push(param_name);
+                params.push(param);
+                r = next_r;
+                let Ok((next_r, _)) = recognize(",")(space(r)) else {
+                    break;
+                };
                 r = next_r;
             }
 
@@ -309,18 +362,21 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
                 );
             };
 
+            let (r, ret_ty) = fn_ret_ty(r).unwrap_or((r, Type::I32));
+
             let Ok((r, _)) = recognize("=")(space(r)) else {
                 return Err("Syntax error in func decl: = could not be found".to_string());
             };
 
-            let (r, stmts) = statements(r)?;
+            let (r, stmts) = statement(r)?;
 
             return Ok((
                 r,
                 Statement::FnDecl(FnDecl {
                     name,
                     params,
-                    stmts,
+                    stmts: vec![stmts],
+                    ret_ty,
                 }),
             ));
         }
@@ -372,6 +428,12 @@ pub fn parse(i: &str) -> Result<Vec<Statement>, String> {
     while let Ok(res) = statement(r) {
         r = res.0;
         stmts.push(res.1);
+    }
+
+    let r = space(r);
+
+    if !r.is_empty() {
+        return Err(format!("Input terminated {r:?}"));
     }
 
     Ok(stmts)

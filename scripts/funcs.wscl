@@ -3,4 +3,4 @@ let t(s) = {
     v * 2
 }
 
-let hello(x y z) = t(x) / y + z;
+let hello(x, y, z) = t(x) / y + z;

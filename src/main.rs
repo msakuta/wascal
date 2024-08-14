@@ -4,7 +4,7 @@ mod parser;
 use std::io::Write;
 
 use compiler::{disasm, encode_leb128, Compiler};
-use parser::{parse, Statement};
+use parser::{parse, FnDecl, Statement, VarDecl};
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
@@ -13,10 +13,12 @@ const WASM_FUNCTION_SECTION: u8 = 3;
 const WASM_CODE_SECTION: u8 = 0x0a;
 const WASM_EXPORT_SECTION: u8 = 0x07;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Type {
     I32,
     I64,
+    F32,
+    F64,
     // Pseudo type representing no value
     Void,
 }
@@ -26,6 +28,8 @@ impl Type {
         match self {
             Self::I32 => 0x7f,
             Self::I64 => 0x7e,
+            Self::F32 => 0x7d,
+            Self::F64 => 0x7c,
             Self::Void => 0x40,
         }
     }
@@ -36,9 +40,25 @@ impl From<u8> for Type {
         match value {
             0x7f => Self::I32,
             0x7e => Self::I64,
+            0x7d => Self::F32,
+            0x7c => Self::F64,
             0x40 => Self::Void,
             _ => panic!("Unknown type"),
         }
+    }
+}
+
+impl TryFrom<&str> for Type {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(match value {
+            "i32" => Type::I32,
+            "i64" => Type::I64,
+            "f32" => Type::F32,
+            "f64" => Type::F64,
+            _ => return Err(format!("Unknown type {}", value)),
+        })
     }
 }
 
@@ -47,6 +67,8 @@ impl std::fmt::Display for Type {
         match self {
             Self::I32 => write!(f, "i32"),
             Self::I64 => write!(f, "i64"),
+            Self::F32 => write!(f, "f32"),
+            Self::F64 => write!(f, "f64"),
             Self::Void => write!(f, "void"),
         }
     }
@@ -67,7 +89,7 @@ struct FuncDef {
     name: String,
     ty: usize,
     code: Vec<u8>,
-    locals: usize,
+    locals: Vec<VarDecl>,
 }
 
 fn main() -> std::io::Result<()> {
@@ -110,31 +132,35 @@ fn main() -> std::io::Result<()> {
 
     let mut funcs = vec![];
 
-    let func_stmts = stmts
-        .iter()
-        .enumerate()
-        .filter_map(|(_, f)| {
-            if let Statement::FnDecl(fn_decl) = f {
-                Some(fn_decl)
-            } else {
-                None
+    fn find_funcs<'a>(stmts: &'a [Statement<'a>], funcs: &mut Vec<&FnDecl<'a>>) {
+        for stmt in stmts.iter() {
+            if let Statement::FnDecl(fn_decl) = stmt {
+                funcs.push(fn_decl);
+                find_funcs(&fn_decl.stmts, funcs);
             }
-        })
-        .collect::<Vec<_>>();
+            if let Statement::Brace(stmts) = stmt {
+                find_funcs(stmts, funcs);
+            }
+        }
+    }
+
+    let mut func_stmts = vec![];
+
+    find_funcs(&stmts, &mut func_stmts);
 
     println!("func_stmts: {}", func_stmts.len());
 
     for func_stmt in &func_stmts {
         let ty = types.len();
         types.push(FuncType {
-            params: func_stmt.params.iter().map(|_| Type::I32).collect(),
-            results: vec![Type::I32],
+            params: func_stmt.params.iter().map(|param| param.ty).collect(),
+            results: vec![func_stmt.ret_ty],
         });
         let func = FuncDef {
             name: func_stmt.name.to_string(),
             ty,
             code: vec![],
-            locals: 0,
+            locals: vec![],
         };
 
         funcs.push(func);
@@ -145,7 +171,7 @@ fn main() -> std::io::Result<()> {
             func_stmt
                 .params
                 .iter()
-                .map(|param| param.to_string())
+                .map(|param| param.clone())
                 .collect::<Vec<_>>(),
             &mut types,
             &imports,
@@ -157,7 +183,7 @@ fn main() -> std::io::Result<()> {
         }
 
         let code = compiler.get_code().to_vec();
-        let locals = compiler.get_locals().len();
+        let locals = compiler.get_locals().to_vec();
 
         let func = &mut funcs[i];
         func.code = code;
@@ -258,16 +284,39 @@ fn code_section(funcs: &[FuncDef]) -> std::io::Result<Vec<u8>> {
 
 fn code_single(fun: &FuncDef) -> std::io::Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
-    let mut writer = std::io::Cursor::new(&mut buf);
 
-    // for _local in 0..fun.locals {
-    writer.write_all(&[1])?; // local decl count
-    writer.write_all(&[fun.locals as u8])?;
-    writer.write_all(&[Type::I32.code()])?;
-    // }
-    writer.write_all(&fun.code)?;
+    let mut last = None;
+    let mut chunks = 0;
+    let mut run_length = 0;
+    for local in &fun.locals {
+        if Some(local.ty) == last {
+            run_length += 1;
+        } else {
+            if 0 < run_length {
+                encode_leb128(&mut buf, run_length)?;
+                buf.push(local.ty.code());
+                chunks += 1;
+            }
+            run_length = 1;
+            last = Some(local.ty);
+        }
+    }
 
-    Ok(buf)
+    if let Some(last) = last {
+        if 0 < run_length {
+            encode_leb128(&mut buf, run_length)?;
+            buf.push(last.code());
+            chunks += 1;
+        }
+    }
+
+    let mut ret = vec![];
+    encode_leb128(&mut ret, chunks)?;
+    ret.write_all(&buf)?;
+
+    ret.write_all(&fun.code)?;
+
+    Ok(ret)
 }
 
 fn export_section(funcs: &[FuncDef], imports: &[FuncImport]) -> std::io::Result<Vec<u8>> {
