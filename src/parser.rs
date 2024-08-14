@@ -21,12 +21,13 @@ pub enum Expression<'src> {
 
 #[derive(Debug)]
 pub enum Statement<'src> {
-    VarDecl(&'src str, Expression<'src>),
+    VarDecl(&'src str, Type, Expression<'src>),
     VarAssign(&'src str, Expression<'src>),
     Expr(Expression<'src>),
     FnDecl(FnDecl<'src>),
     For(For<'src>),
     Brace(Vec<Statement<'src>>),
+    Return(Option<Expression<'src>>),
 }
 
 #[derive(Debug)]
@@ -99,11 +100,11 @@ fn space(mut i: &str) -> &str {
 
 fn identifier(mut input: &str) -> Result<(&str, &str), String> {
     let start = input;
-    if matches!(peek_char(input), Some(_x @ ('a'..='z' | 'A'..='Z'))) {
+    if matches!(peek_char(input), Some(_x @ ('a'..='z' | 'A'..='Z' | '_'))) {
         input = advance_char(input);
         while matches!(
             peek_char(input),
-            Some(_x @ ('a'..='z' | 'A'..='Z' | '0'..='9'))
+            Some(_x @ ('a'..='z' | 'A'..='Z' | '_' | '0'..='9'))
         ) {
             input = advance_char(input);
         }
@@ -312,7 +313,7 @@ fn var_assign(i: &str) -> IResult<&str, Statement> {
     Ok((r, Statement::VarAssign(name, ex)))
 }
 
-fn param_ty(i: &str) -> IResult<&str, Type> {
+fn decl_ty(i: &str) -> IResult<&str, Type> {
     let (r, _) = recognize(":")(space(i))?;
     let (r, ty) = identifier(space(r))?;
     Ok((r, ty.try_into()?))
@@ -320,7 +321,7 @@ fn param_ty(i: &str) -> IResult<&str, Type> {
 
 fn fn_param(i: &str) -> IResult<&str, VarDecl> {
     let (r, param_name) = identifier(space(i))?;
-    let (r, ty) = if let Ok((r, ty)) = param_ty(space(r)) {
+    let (r, ty) = if let Ok((r, ty)) = decl_ty(space(r)) {
         (r, ty)
     } else {
         (r, Type::I32)
@@ -349,6 +350,12 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
 
     if let Ok((r, stmt)) = for_stmt(r) {
         return Ok((r, stmt));
+    }
+
+    if let Ok((r, "return")) = identifier(space(r)) {
+        let (r, ex) = expression(r).map_or((r, None), |(r, ex)| (r, Some(ex)));
+        let (r, _) = recognize(";")(space(r)).unwrap_or((r, ""));
+        return Ok((r, Statement::Return(ex)));
     }
 
     if let Ok((r, _)) = recognize("let")(r) {
@@ -394,14 +401,16 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
             ));
         }
 
+        let (r, ty) = decl_ty(r).unwrap_or((r, Type::I32));
+
         let Ok((r, _)) = recognize("=")(space(r)) else {
             return Err("Syntax error in var decl".to_string());
         };
         let (r, ex) = expression(r)?;
         if let Ok((r, _)) = recognize(";")(space(r)) {
-            return Ok((r, Statement::VarDecl(name, ex)));
+            return Ok((r, Statement::VarDecl(name, ty, ex)));
         }
-        return Ok((r, Statement::VarDecl(name, ex)));
+        return Ok((r, Statement::VarDecl(name, ty, ex)));
     }
 
     if let Ok((r, stmt)) = var_assign(r) {

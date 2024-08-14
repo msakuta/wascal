@@ -14,6 +14,7 @@ pub(crate) enum OpCode {
     End = 0x0b,
     Br = 0x0c,
     BrIf = 0x0d,
+    Return = 0x0F,
     Call = 0x10,
     Drop = 0x1a,
     LocalGet = 0x20,
@@ -76,7 +77,8 @@ macro_rules! impl_op_from {
 }
 
 impl_op_from!(
-    Block: "block", Loop: "loop", If: "if", Else: "else", End: "end", Br: "br", BrIf: "br_if", Call: "call", Drop: "drop",
+    Block: "block", Loop: "loop", If: "if", Else: "else", End: "end", Br: "br", BrIf: "br_if",
+    Return: "return", Call: "call", Drop: "drop",
     LocalGet: "local.get", LocalSet: "local.set", I32Const: "i32.const", F64Const: "f64.const",
     I32LtS: "i32.lt_s",
     I32LtU: "i32.lt_u",
@@ -288,7 +290,7 @@ impl<'a> Compiler<'a> {
 
                 self.code.push(OpCode::End as u8);
 
-                Ok(Type::I32)
+                Ok(if t_branch { Type::I32 } else { Type::Void })
             }
         }
     }
@@ -322,12 +324,15 @@ impl<'a> Compiler<'a> {
     fn emit_stmt(&mut self, stmt: &Statement) -> Result<bool, String> {
         match stmt {
             Statement::Expr(ex) => {
-                self.emit_expr(ex)?;
-                Ok(true)
-            }
-            Statement::VarDecl(name, ex) => {
                 let ty = self.emit_expr(ex)?;
-                self.add_local(*name, ty);
+                Ok(ty != Type::Void)
+            }
+            Statement::VarDecl(name, ty, ex) => {
+                let ex_ty = self.emit_expr(ex)?;
+                if *ty != ex_ty {
+                    return Err(format!("Variable declared type {ty:?} and initializer type {ex_ty:?} are different"));
+                }
+                self.add_local(*name, *ty);
                 Ok(false)
             }
             Statement::VarAssign(name, ex) => {
@@ -414,6 +419,13 @@ impl<'a> Compiler<'a> {
                 Ok(false)
             }
             Statement::Brace(stmts) => self.emit_stmts(stmts),
+            Statement::Return(ex) => {
+                if let Some(ex) = ex {
+                    self.emit_expr(ex)?;
+                }
+                self.code.push(OpCode::Return as u8);
+                Ok(false)
+            }
         }
     }
 
@@ -561,6 +573,9 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let mut label = [0u8];
                 cur.read_exact(&mut label)?;
                 writeln!(f, "{indent}br_if {}", label[0])?;
+            }
+            Return => {
+                writeln!(f, "{indent}return")?;
             }
             Call => {
                 let arg = decode_leb128(&mut cur)?;

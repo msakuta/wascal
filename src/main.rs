@@ -205,14 +205,14 @@ fn main() -> std::io::Result<()> {
         &export_section(&funcs, &imports)?,
     )?;
 
-    write_section(&mut f, WASM_CODE_SECTION, &code_section(&funcs)?)?;
+    write_section(&mut f, WASM_CODE_SECTION, &code_section(&funcs, &types)?)?;
 
     Ok(())
 }
 
 fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Result<()> {
     f.write_all(&[section])?;
-    f.write_all(&[payload.len() as u8])?;
+    encode_leb128(f, payload.len() as i32)?;
     f.write_all(&payload)?;
     Ok(())
 }
@@ -227,11 +227,11 @@ fn types_section(types: &[FuncType]) -> std::io::Result<Vec<u8>> {
         types_writer.write_all(&[0x60])?; //fn
         types_writer.write_all(&[ty.params.len() as u8])?;
         for param in &ty.params {
-            types_writer.write_all(&[param.code()])?; // i32
+            types_writer.write_all(&[param.code()])?;
         }
         types_writer.write_all(&[ty.results.len() as u8])?;
         for res in &ty.results {
-            types_writer.write_all(&[res.code()])?; // i32
+            types_writer.write_all(&[res.code()])?;
         }
     }
 
@@ -267,35 +267,38 @@ fn functions_section(funcs: &[FuncDef]) -> std::io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn code_section(funcs: &[FuncDef]) -> std::io::Result<Vec<u8>> {
+fn code_section(funcs: &[FuncDef], types: &[FuncType]) -> std::io::Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
-    let mut writer = std::io::Cursor::new(&mut buf);
 
-    writer.write_all(&[funcs.len() as u8])?;
+    buf.write_all(&[funcs.len() as u8])?;
 
     for fun in funcs {
-        let fun_buf = code_single(fun)?;
-        writer.write_all(&[fun_buf.len() as u8])?;
-        writer.write_all(&fun_buf)?;
+        let fun_buf = code_single(fun, types)?;
+        encode_leb128(&mut buf, fun_buf.len() as i32)?;
+        buf.write_all(&fun_buf)?;
     }
 
     Ok(buf)
 }
 
-fn code_single(fun: &FuncDef) -> std::io::Result<Vec<u8>> {
+fn code_single(fun: &FuncDef, types: &[FuncType]) -> std::io::Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
+
+    let fn_type = &types[fun.ty];
 
     let mut last = None;
     let mut chunks = 0;
     let mut run_length = 0;
-    for local in &fun.locals {
+    for local in fun.locals.iter().skip(fn_type.params.len()) {
         if Some(local.ty) == last {
             run_length += 1;
         } else {
-            if 0 < run_length {
-                encode_leb128(&mut buf, run_length)?;
-                buf.push(local.ty.code());
-                chunks += 1;
+            if let Some(last) = last {
+                if 0 < run_length {
+                    encode_leb128(&mut buf, run_length)?;
+                    buf.push(last.code());
+                    chunks += 1;
+                }
             }
             run_length = 1;
             last = Some(local.ty);
