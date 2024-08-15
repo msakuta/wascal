@@ -62,9 +62,7 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
     if matches!(peek_char(input), Some(_x @ ('-' | '+' | '.' | '0'..='9'))) {
         input = advance_char(input);
         while matches!(input.chars().next(), Some(_x @ ('.' | '0'..='9'))) {
-            let mut chars = input.chars();
-            chars.next();
-            input = chars.as_str();
+            input = advance_char(input);
         }
         let slice = &start[..(input.as_ptr() as usize - start.as_ptr() as usize)];
         if slice.contains('.') {
