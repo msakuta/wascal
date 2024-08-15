@@ -174,7 +174,7 @@ impl<'a> Compiler<'a> {
                 self.local_get(ret);
                 Ok(ty)
             }
-            Expression::FnInvoke(name, arg) => {
+            Expression::FnInvoke(name, args) => {
                 let idx;
                 let fn_ty;
                 if let Some((i, import)) = self
@@ -193,8 +193,11 @@ impl<'a> Compiler<'a> {
                 } else {
                     return Err(format!("Calling undefined function {}", name));
                 };
-                // We assume functions take exactly 1 argument and 1 return value.
-                self.emit_expr(arg)?;
+                for arg in args {
+                    if Type::Void == self.emit_expr(arg)? {
+                        return Err("Function argument requires a value".to_string());
+                    }
+                }
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, idx as i32).unwrap();
                 let fn_ty = &self.types[fn_ty];

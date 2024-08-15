@@ -5,7 +5,7 @@ pub enum Expression<'src> {
     LiteralI32(i32),
     LiteralF64(f64),
     Variable(&'src str),
-    FnInvoke(&'src str, Box<Expression<'src>>),
+    FnInvoke(&'src str, Vec<Expression<'src>>),
     Add(Box<Expression<'src>>, Box<Expression<'src>>),
     Sub(Box<Expression<'src>>, Box<Expression<'src>>),
     Mul(Box<Expression<'src>>, Box<Expression<'src>>),
@@ -118,12 +118,25 @@ fn identifier(mut input: &str) -> Result<(&str, &str), String> {
 }
 
 fn fn_call<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Expression<'a>> {
-    let (r, _) = recognize("(")(space(i))?;
-    let (r, res) = expression(r)?;
+    let (mut r, _) = recognize("(")(space(i))?;
+
+    let mut args = vec![];
+    loop {
+        let Ok((next_r, arg)) = expression(r) else {
+            break;
+        };
+        args.push(arg);
+        r = next_r;
+        let Ok((next_r, _)) = recognize(",")(space(r)) else {
+            break;
+        };
+        r = next_r;
+    }
+
     let Ok((r, _)) = recognize(")")(r) else {
         return Err("FnInvoke is not closed".to_string());
     };
-    return Ok((r, Expression::FnInvoke(name, Box::new(res))));
+    return Ok((r, Expression::FnInvoke(name, args)));
 }
 
 fn factor(i: &str) -> Result<(&str, Expression), String> {
