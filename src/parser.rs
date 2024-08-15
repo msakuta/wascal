@@ -59,16 +59,15 @@ type IResult<R, T> = Result<(R, T), String>;
 
 fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
     let start = input;
-    if matches!(
-        input.chars().next(),
-        Some(_x @ ('-' | '+' | '.' | '0'..='9'))
-    ) {
+    if matches!(peek_char(input), Some(_x @ ('-' | '+' | '.' | '0'..='9'))) {
+        input = advance_char(input);
         while matches!(input.chars().next(), Some(_x @ ('.' | '0'..='9'))) {
             let mut chars = input.chars();
             chars.next();
             input = chars.as_str();
         }
-        let slice = &start[..(start.len() - input.len())];
+        let slice = &start[..(input.as_ptr() as usize - start.as_ptr() as usize)];
+        dbg!(slice);
         if slice.contains('.') {
             let num = slice.parse::<f64>().map_err(|s| s.to_string())?;
             Ok((input, Expression::LiteralF64(num)))
@@ -79,6 +78,14 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
     } else {
         Err("Not a number".to_string())
     }
+}
+
+#[test]
+fn test_uneg() {
+    assert!(matches!(
+        num_literal("-2.5"),
+        Ok(("", Expression::LiteralF64(-2.5)))
+    ));
 }
 
 fn advance_char(input: &str) -> &str {

@@ -49,6 +49,18 @@ pub(crate) enum OpCode {
     F64Sub = 0xa1,
     F64Mul = 0xa2,
     F64Div = 0xa3,
+    I32WrapI64 = 0xa7,
+    I32TruncF32S = 0xa8,
+    I32TruncF64S = 0xaa,
+    I64ExtendI32S = 0xac,
+    I64TruncF32S = 0xae,
+    I64TruncF64S = 0xb0,
+    F32ConvertI32S = 0xb2,
+    F32ConvertI64S = 0xb4,
+    F32DemoteF64 = 0xb6,
+    F64ConvertI32S = 0xb7,
+    F64ConvertI64S = 0xb9,
+    F64PromoteF32 = 0xbb,
 }
 
 macro_rules! impl_op_from {
@@ -102,6 +114,18 @@ impl_op_from!(
     I64DivS: "i64.div_s",
     F32Add: "f32.add", F32Sub: "f32.sub", F32Mul: "f32.mul", F32Div: "f32.div",
     F64Add: "f64.add", F64Sub: "f64.sub", F64Mul: "f64.mul", F64Div: "f64.div",
+    I32WrapI64: "i32.wrap_i64",
+    I32TruncF32S: "i32.trunc_f32_s",
+    I32TruncF64S: "i32.trunc_f32_s",
+    I64ExtendI32S: "i64.extend_i32_s",
+    I64TruncF32S: "i64.trunc_f32_s",
+    I64TruncF64S: "i64.trunc_f64_s",
+    F32ConvertI32S: "f32.convert_i32_s",
+    F32ConvertI64S: "f32.convert_i64_s",
+    F32DemoteF64: "f32.demote_f64",
+    F64ConvertI32S: "f64.convert_i32_s",
+    F64ConvertI64S: "f64.convert_i64_s",
+    F64PromoteF32: "f64.promote_f32",
 );
 
 struct TypeMap {
@@ -312,15 +336,25 @@ impl<'a> Compiler<'a> {
     ) -> Result<Type, String> {
         let lhs = self.emit_expr(lhs)?;
         let rhs = self.emit_expr(rhs)?;
-        let op = match (lhs, rhs) {
-            (Type::I32, Type::I32) => ty_map.i32,
-            (Type::I64, Type::I64) => ty_map.i64,
-            (Type::F32, Type::F32) => ty_map.f32,
-            (Type::F64, Type::F64) => ty_map.f64,
+        let (op, ty) = match (lhs, rhs) {
+            (Type::I32, Type::I32) => (ty_map.i32, lhs),
+            (Type::I64, Type::I64) => (ty_map.i64, lhs),
+            (Type::F32, Type::F32) => (ty_map.f32, lhs),
+            (Type::F64, Type::F64) => (ty_map.f64, lhs),
+            (Type::I32, Type::F64) => {
+                let lhs_local = self.add_local("", Type::F64);
+                self.code.push(OpCode::F64ConvertI32S as u8);
+                self.local_get(lhs_local);
+                (ty_map.f64, Type::F64)
+            }
+            (Type::F64, Type::I32) => {
+                self.code.push(OpCode::F64ConvertI32S as u8);
+                (ty_map.f64, Type::F64)
+            }
             _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
         };
         self.code.push(op as u8);
-        Ok(lhs)
+        Ok(ty)
     }
 
     /// Returns if a value is pushed to the stack
@@ -332,9 +366,11 @@ impl<'a> Compiler<'a> {
             }
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.emit_expr(ex)?;
-                if *ty != ex_ty {
-                    return Err(format!("Variable declared type {ty:?} and initializer type {ex_ty:?} are different"));
-                }
+                self.coerce_type(*ty, ex_ty).map_err(|_| {
+                    format!(
+                        "Variable declared type {ty:?} and initializer type {ex:?} are different"
+                    )
+                })?;
                 self.add_local(*name, *ty);
                 Ok(false)
             }
@@ -381,10 +417,12 @@ impl<'a> Compiler<'a> {
                 stmts,
             }) => {
                 let start_ty = self.emit_expr(start)?;
-                let idx = self.add_local(*name, start_ty);
+                self.coerce_type(Type::I32, start_ty)?; // For now for loop uses i32 for loop variable
+                let idx = self.add_local(*name, Type::I32);
 
                 let end_ty = self.emit_expr(end)?;
-                let end = self.add_local("", end_ty);
+                self.coerce_type(Type::I32, end_ty)?; // Enough fors
+                let end = self.add_local("", Type::I32);
 
                 // Start block
                 self.code.push(OpCode::Block as u8);
@@ -452,6 +490,19 @@ impl<'a> Compiler<'a> {
             ty,
         });
         ret
+    }
+
+    fn coerce_type(&mut self, ty: Type, ex: Type) -> Result<(), String> {
+        match (ty, ex) {
+            (Type::I32, Type::I32)
+            | (Type::I64, Type::I64)
+            | (Type::F32, Type::F32)
+            | (Type::F64, Type::F64) => {}
+            (Type::I32, Type::F64) => self.code.push(OpCode::I32TruncF64S as u8),
+            (Type::F64, Type::I32) => self.code.push(OpCode::F64ConvertI32S as u8),
+            _ => return Err(format!("Coercing type {ty:?} from type {ex:?} failed")),
+        }
+        Ok(())
     }
 }
 
@@ -608,7 +659,9 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
             I32LtS | I32LtU | I32GtS | I32GtU | I32Add | I32Sub | I32Mul | I32DivS | I64LtS
             | I64LtU | I64GtS | I64GtU | I64Add | I64Sub | I64Mul | I64DivS | F32Lt | F32Gt
             | F32Add | F32Sub | F32Mul | F32Div | F64Lt | F64Gt | F64Add | F64Sub | F64Mul
-            | F64Div => {
+            | F64Div | I32WrapI64 | I32TruncF32S | I32TruncF64S | I64ExtendI32S | I64TruncF32S
+            | I64TruncF64S | F32ConvertI32S | F32ConvertI64S | F32DemoteF64 | F64ConvertI32S
+            | F64ConvertI64S | F64PromoteF32 => {
                 writeln!(f, "{indent}{}", code.to_name())?;
             }
             End => {
