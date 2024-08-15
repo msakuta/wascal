@@ -83,7 +83,7 @@ window.addEventListener("load", () => {
             output.innerHTML = hello.apply(this, args);
         }
         catch(e){
-            consoleElem.value = e;
+            outputBuf = e;
         }
         const end = performance.now();
         consoleElem.innerHTML = outputBuf;
