@@ -25,6 +25,7 @@ let argElems = [];
 
 window.addEventListener("load", () => {
     const consoleElem = document.getElementById("console");
+    let outputBuf = "";
 
     const opts = {
         Math: {
@@ -35,7 +36,7 @@ window.addEventListener("load", () => {
         },
         output: {
             putc: c => {
-                consoleElem.innerHTML += String.fromCharCode(c);
+                outputBuf += String.fromCharCode(c);
             }
         }
     };
@@ -77,6 +78,7 @@ window.addEventListener("load", () => {
         const output = document.getElementById('output');
         const hello = obj.instance.exports.hello;
         const start = performance.now();
+        outputBuf = "";
         try{
             output.innerHTML = hello.apply(this, args);
         }
@@ -84,6 +86,7 @@ window.addEventListener("load", () => {
             consoleElem.value = e;
         }
         const end = performance.now();
+        consoleElem.innerHTML = outputBuf;
         document.getElementById("timeMessage").innerHTML = `Execution time: ${(end - start).toFixed(1)} ms (See <a href="#Time">notes</a>)`;
     });
 });

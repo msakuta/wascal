@@ -46,4 +46,4 @@ let mandel(xmin: f64, ymin: f64, xstep: f64, ystep: f64, xsteps: f64, ysteps: f6
     0
 }
 
-let hello() = mandel(-2.3, -2.0, 0.025, 0.05, 78., 40.);
+let hello() = mandel(-2.3, -2.0, 0.025 / 2., 0.05 / 2., 156., 80.);
