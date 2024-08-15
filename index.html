@@ -20,25 +20,26 @@
         </style>
         <script>
 
-const opts = {
-    Math: {
-        abs: x => Math.abs(x),
-    },
-    console: {
-        log: console.log,
-    },
-    output: {
-        putc: c => {
-            const elem = document.getElementById("console");
-            elem.innerHTML += String.fromCharCode(c);
-        }
-    }
-}
-
 let obj;
 let argElems = [];
 
 window.addEventListener("load", () => {
+    const consoleElem = document.getElementById("console");
+
+    const opts = {
+        Math: {
+            abs: x => Math.abs(x),
+        },
+        console: {
+            log: console.log,
+        },
+        output: {
+            putc: c => {
+                consoleElem.innerHTML += String.fromCharCode(c);
+            }
+        }
+    };
+
     const load = document.getElementById("load");
     load.addEventListener("click", async () => {
         console.log("Loading wasm");
@@ -75,7 +76,15 @@ window.addEventListener("load", () => {
         }
         const output = document.getElementById('output');
         const hello = obj.instance.exports.hello;
-        output.innerHTML = hello.apply(this, args);
+        const start = performance.now();
+        try{
+            output.innerHTML = hello.apply(this, args);
+        }
+        catch(e){
+            consoleElem.value = e;
+        }
+        const end = performance.now();
+        document.getElementById("timeMessage").innerHTML = `Execution time: ${(end - start).toFixed(1)} ms (See <a href="#Time">notes</a>)`;
     });
 });
 
@@ -89,8 +98,17 @@ window.addEventListener("load", () => {
             Output: <span id="output"></span>
         </p>
         <button id="call">Call</button>
+        <div id="timeMessage"></div>
         <div class="code">
             <textarea  id="console" type="text" readonly cols="120"  rows="20" ></textarea>
+        </div>
+
+        <div class="justify">
+            <h2 id="Time">Time measurement resolution</h2>
+            Due to security reasons, your browser may have reduced time resolution for measurement.
+            It is typically 0.1ms or 1ms, but can be larger.
+            Please be aware that the lower digits may be always 0 because of this rounding.
+            See <a href="https://developer.mozilla.org/en-US/docs/Web/API/Performance/now#reduced_time_precision">this page</a> for details.
         </div>
     </body>
 </html>
