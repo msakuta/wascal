@@ -114,11 +114,6 @@ fn main() -> std::io::Result<()> {
 
     let imports = vec![
         FuncImport {
-            module: "Math",
-            name: "abs",
-            ty: 0,
-        },
-        FuncImport {
             module: "console",
             name: "log",
             ty: 0,
