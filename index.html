@@ -17,20 +17,26 @@
                 text-align: justify;
                 padding: 2em;
             }
+            .leftAlign {
+                text-align: left;
+                padding: 1em;
+            }
+            .border {
+                border: solid black 2px;
+                margin: 2em;
+                padding: 1em;
+            }
         </style>
         <script>
 
 let obj;
-let argElems = [];
 
 window.addEventListener("load", () => {
     const consoleElem = document.getElementById("console");
     let outputBuf = "";
+    let functionElems = {};
 
     const opts = {
-        Math: {
-            abs: x => Math.abs(x),
-        },
         console: {
             log: console.log,
         },
@@ -46,41 +52,55 @@ window.addEventListener("load", () => {
         console.log("Loading wasm");
         obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"), opts);
 
-        const params = document.getElementById("params");
-        while (params.firstChild) params.removeChild(params.firstChild);
-        argElems = [];
+        const functions = document.getElementById("functions");
+        while (functions.firstChild) functions.removeChild(functions.firstChild);
+        functionElems = [];
+        for (let expName in obj.instance.exports) {
+            const expFunc = obj.instance.exports[expName];
+            const funcElem = document.createElement("div");
+            const fNameElem = document.createTextNode(expName + "(");
+            funcElem.appendChild(fNameElem);
 
-        if (!obj.instance.exports.hello) {
-            const errorElem = document.createElement("div");
-            errorElem.innerHTML = "Compiled Wasm module does not have function 'hello'";
-            params.appendChild(errorElem);
-            return;
-        }
+            const argElems = [];
 
-        for (let i = 0; i < obj.instance.exports.hello.length; i++) {
-            const label = document.createElement("label");
-            const input = document.createElement("input");
-            input.setAttribute("type", "text");
-            input.value = 1;
-            label.appendChild(input);
-            params.appendChild(label);
-            argElems.push(input);
+            for (let i = 0; i < expFunc.length; i++) {
+                const label = document.createElement("label");
+                const input = document.createElement("input");
+                input.setAttribute("type", "text");
+                input.value = 1;
+                label.appendChild(input);
+                funcElem.appendChild(label);
+                if (i < expFunc.length - 1) {
+                    funcElem.appendChild(document.createTextNode(", "));
+                }
+                argElems.push(input);
+            }
+            funcElem.appendChild(document.createTextNode(")"));
+
+            const callButton = document.createElement("button");
+            callButton.innerHTML = "Call";
+            callButton.addEventListener("click", callFunc(expName));
+            funcElem.appendChild(callButton);
+
+            functions.appendChild(funcElem);
+            functionElems[expName] = argElems;
         }
     });
-    const call = document.getElementById("call");
-    call.addEventListener("click", async () => {
+    
+    const callFunc = expName => async () => {
+        const expFunc = obj.instance.exports[expName];
         console.log("Calling wasm");
+        const argElems = functionElems[expName];
         let args = [];
-        for (let i = 0; i < obj.instance.exports.hello.length; i++) {
+        for (let i = 0; i < expFunc.length; i++) {
             const x = parseFloat(argElems[i].value);
             args.push(x);
         }
         const output = document.getElementById('output');
-        const hello = obj.instance.exports.hello;
         const start = performance.now();
         outputBuf = "";
         try{
-            output.innerHTML = hello.apply(this, args);
+            output.innerHTML = expFunc.apply(this, args);
         }
         catch(e){
             outputBuf = e;
@@ -88,7 +108,7 @@ window.addEventListener("load", () => {
         const end = performance.now();
         consoleElem.innerHTML = outputBuf;
         document.getElementById("timeMessage").innerHTML = `Execution time: ${(end - start).toFixed(1)} ms (See <a href="#Time">notes</a>)`;
-    });
+    };
 });
 
         </script>
@@ -96,11 +116,13 @@ window.addEventListener("load", () => {
     <body>
         <h1>Wascal</h1>
         <button id="load">Load wasm module</button>
-        <div id="params"></div>
+        <div class="border">
+            <h2>Function List</h2>
+            <div id="functions" class="leftAlign"></div>
+        </div>
         <p>
             Output: <span id="output"></span>
         </p>
-        <button id="call">Call</button>
         <div id="timeMessage"></div>
         <div class="code">
             <textarea  id="console" type="text" readonly cols="120"  rows="20" ></textarea>
