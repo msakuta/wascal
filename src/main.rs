@@ -189,7 +189,19 @@ fn main() -> std::io::Result<()> {
         func.code = code;
         func.locals = locals;
 
-        println!("Disasm {}: ", func.name);
+        let params = &func.locals[..types[func.ty].params.len()];
+        let params = params.iter().fold("".to_string(), |mut acc, cur| {
+            if !acc.is_empty() {
+                acc += ", ";
+            }
+            acc += &format!("{}: {}", cur.name, cur.ty);
+            acc
+        });
+
+        println!(
+            "Disasm {}({}) -> {}: ",
+            func.name, params, types[func.ty].results[0]
+        );
         disasm(&func.code, &mut std::io::stdout())?;
     }
 
