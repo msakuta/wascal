@@ -67,7 +67,6 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
             input = chars.as_str();
         }
         let slice = &start[..(input.as_ptr() as usize - start.as_ptr() as usize)];
-        dbg!(slice);
         if slice.contains('.') {
             let num = slice.parse::<f64>().map_err(|s| s.to_string())?;
             Ok((input, Expression::LiteralF64(num)))
@@ -170,45 +169,39 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
 }
 
 fn mul(i: &str) -> Result<(&str, Expression), String> {
-    let (r, lhs) = factor(i)?;
+    let (r, mut lhs) = factor(i)?;
 
-    let r = space(r);
+    let mut r = space(r);
 
-    if 1 <= r.len() && matches!(&r[..1], "*" | "/") {
+    while 1 <= r.len() && matches!(&r[..1], "*" | "/") {
         let op = &r[..1];
-        let (r, rhs) = mul(&r[1..])?;
-        Ok((
-            r,
-            if op == "*" {
-                Expression::Mul(Box::new(lhs), Box::new(rhs))
-            } else {
-                Expression::Div(Box::new(lhs), Box::new(rhs))
-            },
-        ))
-    } else {
-        Ok((r, lhs))
+        let (next_r, rhs) = factor(&r[1..])?;
+        r = space(next_r);
+        lhs = if op == "*" {
+            Expression::Mul(Box::new(lhs), Box::new(rhs))
+        } else {
+            Expression::Div(Box::new(lhs), Box::new(rhs))
+        };
     }
+    Ok((r, lhs))
 }
 
 fn add(i: &str) -> Result<(&str, Expression), String> {
-    let (r, lhs) = mul(i)?;
+    let (r, mut lhs) = mul(i)?;
 
-    let r = space(r);
+    let mut r = space(r);
 
-    if 1 <= r.len() && matches!(&r[..1], "+" | "-") {
+    while 1 <= r.len() && matches!(&r[..1], "+" | "-") {
         let op = &r[..1];
-        let (r, rhs) = add(&r[1..])?;
-        Ok((
-            r,
-            if op == "+" {
-                Expression::Add(Box::new(lhs), Box::new(rhs))
-            } else {
-                Expression::Sub(Box::new(lhs), Box::new(rhs))
-            },
-        ))
-    } else {
-        Ok((r, lhs))
+        let (next_r, rhs) = mul(&r[1..])?;
+        r = space(next_r);
+        lhs = if op == "+" {
+            Expression::Add(Box::new(lhs), Box::new(rhs))
+        } else {
+            Expression::Sub(Box::new(lhs), Box::new(rhs))
+        };
     }
+    Ok((r, lhs))
 }
 
 fn _parse_params(i: &str) -> Result<(&str, Vec<&str>), String> {
