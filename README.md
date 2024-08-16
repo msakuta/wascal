@@ -2,6 +2,8 @@
 
 This is a language parser/compiler into WebAssembly written in pure Rust _without any dependencies_.
 
+Try it now on your browser! https://msakuta.github.io/wascal
+
 The bytecode is produced directly from the crate without using any library.
 People usually use LLVM or Cranelift to generate code, but WebAssembly spec is [fully open and relatively simple](https://www.w3.org/TR/wasm-core-1/), so nothing stops you from writing everything from scratch.
 It could be suboptimal, but I have full control on the code generation.
@@ -76,3 +78,19 @@ You may even separate build and run steps to measure only the running time.
 cargo b --release
 time target/release/waseval
 ```
+
+## How to run the compiler on a browser to compile and run Wasm
+
+You can also build a wasm compiler in wasm and run on the browser,
+which can compile a source code into wasm and run on the browser
+(yes it's disorienting but that's what it does).
+
+    cd wasm
+    npm run build
+
+To launch the application, you can use `npx`
+
+    cd dist
+    npx serve
+
+and browse http://localhost:5000.
