@@ -68,7 +68,7 @@ document.getElementById("parseAst").addEventListener("click", () => runCommon(so
 }));
 document.getElementById("compile").addEventListener("click", () => runCommon(async source => {
     const wasm = compile(source);
-    document.getElementById("console").value = wasm;
+    consoleElem.value = `Compiled WebAssembly module in ${wasm.length} bytes.`;
 
     const obj = await WebAssembly.instantiate(wasm, opts);
 
