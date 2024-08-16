@@ -1,4 +1,4 @@
-import { compile, parse_ast,
+import { compile, parse_ast, disasm,
     // type_check, run_script, parse_ast, compile, disasm, compile_and_run
  } from "../pkg/index.js";
 

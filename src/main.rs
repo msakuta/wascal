@@ -5,7 +5,7 @@ mod wasm_file;
 
 use wasm_file::compile_wasm;
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut f = std::io::BufWriter::new(std::fs::File::create("wascal.wasm")?);
 
     let arg = std::env::args()

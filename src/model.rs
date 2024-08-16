@@ -1,7 +1,7 @@
 use crate::parser::VarDecl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Type {
+pub enum Type {
     I32,
     I64,
     F32,

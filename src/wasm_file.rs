@@ -1,10 +1,10 @@
 //! Code to write wasm file format sections.
 use crate::{
-    compiler::{disasm, encode_leb128, Compiler},
+    compiler::{disasm_func, encode_leb128, Compiler},
     model::{FuncDef, FuncImport, FuncType, Type},
     parser::{parse, FnDecl, Statement},
 };
-use std::io::Write;
+use std::{error::Error, io::Write};
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
@@ -13,10 +13,59 @@ const WASM_FUNCTION_SECTION: u8 = 3;
 const WASM_CODE_SECTION: u8 = 0x0a;
 const WASM_EXPORT_SECTION: u8 = 0x07;
 
-pub fn compile_wasm(f: &mut impl Write, source: &str) -> std::io::Result<()> {
+#[derive(Debug)]
+pub enum CompileError {
+    IO(std::io::Error),
+    Compile(String),
+}
+
+impl std::fmt::Display for CompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IO(e) => e.fmt(f),
+            Self::Compile(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl Error for CompileError {}
+
+impl From<std::io::Error> for CompileError {
+    fn from(value: std::io::Error) -> Self {
+        Self::IO(value)
+    }
+}
+
+pub type CompileResult<T> = Result<T, CompileError>;
+
+pub fn compile_wasm(f: &mut impl Write, source: &str) -> CompileResult<()> {
     f.write_all(b"\0asm")?;
     f.write_all(&WASM_BINARY_VERSION)?;
 
+    let (types, imports, funcs) = codegen(source, None)?;
+
+    write_section(f, WASM_TYPE_SECTION, &types_section(&types)?)?;
+
+    write_section(f, WASM_IMPORT_SECTION, &import_section(&imports)?)?;
+
+    write_section(f, WASM_FUNCTION_SECTION, &functions_section(&funcs)?)?;
+
+    write_section(f, WASM_EXPORT_SECTION, &export_section(&funcs, &imports)?)?;
+
+    write_section(f, WASM_CODE_SECTION, &code_section(&funcs, &types)?)?;
+
+    Ok(())
+}
+
+pub fn disasm_wasm(f: &mut impl Write, source: &str) -> CompileResult<()> {
+    let _ = codegen(source, Some(f))?;
+    Ok(())
+}
+
+fn codegen(
+    source: &str,
+    mut disasm_f: Option<&mut dyn Write>,
+) -> CompileResult<(Vec<FuncType>, Vec<FuncImport>, Vec<FuncDef>)> {
     let mut types = vec![FuncType {
         params: vec![Type::I32],
         results: vec![Type::I32],
@@ -87,8 +136,7 @@ pub fn compile_wasm(f: &mut impl Write, source: &str) -> std::io::Result<()> {
             &mut funcs,
         );
         if let Err(e) = compiler.compile(&func_stmt.stmts) {
-            println!("Compile error: {e}");
-            return Ok(());
+            return Err(CompileError::Compile(e));
         }
 
         let code = compiler.get_code().to_vec();
@@ -98,47 +146,14 @@ pub fn compile_wasm(f: &mut impl Write, source: &str) -> std::io::Result<()> {
         func.code = code;
         func.locals = locals;
 
-        let func_ty = &types[func.ty];
+        if let Some(ref mut disasm_f) = disasm_f {
+            let func_ty = &types[func.ty];
 
-        let params = &func.locals[..func_ty.params.len()];
-        let params = params.iter().fold("".to_string(), |mut acc, cur| {
-            if !acc.is_empty() {
-                acc += ", ";
-            }
-            acc += &format!("{}: {}", cur.name, cur.ty);
-            acc
-        });
-
-        println!(
-            "Disasm {}({}) -> {}: ",
-            func.name, params, func_ty.results[0]
-        );
-        let locals = &func.locals[func_ty.params.len()..];
-        let locals = locals
-            .iter()
-            .enumerate()
-            .fold("".to_string(), |mut acc, (i, cur)| {
-                if !acc.is_empty() {
-                    acc += ", ";
-                }
-                acc += &format!("[{}] {}: {}", i + func_ty.params.len(), cur.name, cur.ty);
-                acc
-            });
-        println!("  locals: {locals}");
-        disasm(&func.code, &mut std::io::stdout())?;
+            disasm_func(&func, &func_ty, disasm_f)?;
+        }
     }
 
-    write_section(f, WASM_TYPE_SECTION, &types_section(&types)?)?;
-
-    write_section(f, WASM_IMPORT_SECTION, &import_section(&imports)?)?;
-
-    write_section(f, WASM_FUNCTION_SECTION, &functions_section(&funcs)?)?;
-
-    write_section(f, WASM_EXPORT_SECTION, &export_section(&funcs, &imports)?)?;
-
-    write_section(f, WASM_CODE_SECTION, &code_section(&funcs, &types)?)?;
-
-    Ok(())
+    Ok((types, imports, funcs))
 }
 
 fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Result<()> {

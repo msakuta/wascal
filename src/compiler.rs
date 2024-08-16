@@ -674,3 +674,38 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
         }
     }
 }
+
+pub fn disasm_func(
+    func: &FuncDef,
+    func_ty: &FuncType,
+    out: &mut impl Write,
+) -> std::io::Result<()> {
+    let params = &func.locals[..func_ty.params.len()];
+    let params = params.iter().fold("".to_string(), |mut acc, cur| {
+        if !acc.is_empty() {
+            acc += ", ";
+        }
+        acc += &format!("{}: {}", cur.name, cur.ty);
+        acc
+    });
+
+    writeln!(
+        out,
+        "Disasm {}({}) -> {}: ",
+        func.name, params, func_ty.results[0]
+    )?;
+    let locals = &func.locals[func_ty.params.len()..];
+    let locals = locals
+        .iter()
+        .enumerate()
+        .fold("".to_string(), |mut acc, (i, cur)| {
+            if !acc.is_empty() {
+                acc += ", ";
+            }
+            acc += &format!("[{}] {}: {}", i + func_ty.params.len(), cur.name, cur.ty);
+            acc
+        });
+    writeln!(out, "  locals: {locals}")?;
+
+    disasm(&func.code, out)
+}
