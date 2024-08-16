@@ -3,4 +3,4 @@ mod model;
 mod parser;
 mod wasm_file;
 
-pub use wasm_file::compile_wasm;
+pub use crate::{parser::parse, wasm_file::compile_wasm};
