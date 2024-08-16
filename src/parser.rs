@@ -1,4 +1,4 @@
-use crate::Type;
+use crate::model::Type;
 
 #[derive(Debug)]
 pub enum Expression<'src> {

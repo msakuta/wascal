@@ -1,8 +1,8 @@
 use std::io::{Read, Write};
 
 use crate::{
+    model::{FuncDef, FuncImport, FuncType, Type},
     parser::{Expression, FnDecl, For, Statement, VarDecl},
-    FuncDef, FuncImport, FuncType, Type,
 };
 
 #[derive(Debug, Clone, Copy)]
