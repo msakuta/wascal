@@ -23,11 +23,6 @@ async function runCommon(process) {
     document.getElementById("timeMessage").innerHTML = `Execution time: ${(end - start).toFixed(1)} ms (See <a href="#Time">notes</a>)`;
 }
 
-document.getElementById("typeCheck").addEventListener("click", () => runCommon(source => {
-    const result = type_check(source);
-    document.getElementById("output").value = result;
-}));
-document.getElementById("run").addEventListener("click", () => runCommon(hi));
 document.getElementById("parseAst").addEventListener("click", () => runCommon(source => {
     const result = parse_ast(source);
     document.getElementById("output").value = result;
