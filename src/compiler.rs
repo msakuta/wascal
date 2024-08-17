@@ -225,7 +225,7 @@ impl<'a> Compiler<'a> {
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, idx as i32).unwrap();
                 let fn_ty = &self.types[fn_ty];
-                Ok(fn_ty.results[0])
+                Ok(fn_ty.results.get(0).copied().unwrap_or(Type::Void))
             }
             Expression::Add(lhs, rhs) => self.emit_bin_op(
                 lhs,

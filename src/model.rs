@@ -61,14 +61,14 @@ impl std::fmt::Display for Type {
     }
 }
 
-pub(crate) struct FuncType {
+pub struct FuncType {
     pub params: Vec<Type>,
     pub results: Vec<Type>,
 }
 
-pub(crate) struct FuncImport {
-    pub module: &'static str,
-    pub name: &'static str,
+pub struct FuncImport {
+    pub module: String,
+    pub name: String,
     pub ty: usize,
 }
 

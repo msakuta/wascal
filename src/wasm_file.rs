@@ -1,7 +1,7 @@
 //! Code to write wasm file format sections.
 use crate::{
     compiler::{disasm_func, encode_leb128, Compiler},
-    model::{FuncDef, FuncImport, FuncType, Type},
+    model::{FuncDef, FuncImport, FuncType},
     parser::{parse, FnDecl, Statement},
 };
 use std::{error::Error, io::Write};
@@ -38,11 +38,17 @@ impl From<std::io::Error> for CompileError {
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
-pub fn compile_wasm(f: &mut impl Write, source: &str) -> CompileResult<()> {
+pub fn compile_wasm(
+    f: &mut impl Write,
+    source: &str,
+    types: &mut Vec<FuncType>,
+    imports: &[FuncImport],
+    disasm_f: Option<&mut dyn Write>,
+) -> CompileResult<()> {
     f.write_all(b"\0asm")?;
     f.write_all(&WASM_BINARY_VERSION)?;
 
-    let (types, imports, funcs) = codegen(source, None)?;
+    let funcs = codegen(source, types, imports, disasm_f)?;
 
     write_section(f, WASM_TYPE_SECTION, &types_section(&types)?)?;
 
@@ -57,36 +63,25 @@ pub fn compile_wasm(f: &mut impl Write, source: &str) -> CompileResult<()> {
     Ok(())
 }
 
-pub fn disasm_wasm(f: &mut impl Write, source: &str) -> CompileResult<()> {
-    let _ = codegen(source, Some(f))?;
+pub fn disasm_wasm(
+    f: &mut impl Write,
+    source: &str,
+    types: &mut Vec<FuncType>,
+    imports: &[FuncImport],
+) -> CompileResult<()> {
+    let _ = codegen(source, types, imports, Some(f))?;
     Ok(())
 }
 
 fn codegen(
     source: &str,
+    types: &mut Vec<FuncType>,
+    imports: &[FuncImport],
     mut disasm_f: Option<&mut dyn Write>,
-) -> CompileResult<(Vec<FuncType>, Vec<FuncImport>, Vec<FuncDef>)> {
-    let mut types = vec![FuncType {
-        params: vec![Type::I32],
-        results: vec![Type::I32],
-    }];
-
+) -> CompileResult<Vec<FuncDef>> {
     let stmts = parse(&source).unwrap();
 
     println!("ast: {stmts:?}");
-
-    let imports = vec![
-        FuncImport {
-            module: "console",
-            name: "log",
-            ty: 0,
-        },
-        FuncImport {
-            module: "output",
-            name: "putc",
-            ty: 0,
-        },
-    ];
 
     let mut funcs = vec![];
 
@@ -131,7 +126,7 @@ fn codegen(
                 .iter()
                 .map(|param| param.clone())
                 .collect::<Vec<_>>(),
-            &mut types,
+            types,
             &imports,
             &mut funcs,
         );
@@ -153,7 +148,7 @@ fn codegen(
         }
     }
 
-    Ok((types, imports, funcs))
+    Ok(funcs)
 }
 
 fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Result<()> {
@@ -191,8 +186,8 @@ fn import_section(funcs: &[FuncImport]) -> std::io::Result<Vec<u8>> {
     encode_leb128(writer, funcs.len() as i32)?;
 
     for fun in funcs.iter() {
-        write_string(&mut writer, fun.module)?;
-        write_string(&mut writer, fun.name)?;
+        write_string(&mut writer, &fun.module)?;
+        write_string(&mut writer, &fun.name)?;
         writer.write_all(&[0 as u8])?; // import kind
         writer.write_all(&[fun.ty as u8])?;
     }

@@ -1,6 +1,6 @@
 use crate::model::Type;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Expression<'src> {
     LiteralI32(i32),
     LiteralF64(f64),
@@ -19,7 +19,7 @@ pub enum Expression<'src> {
     ),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Statement<'src> {
     VarDecl(&'src str, Type, Expression<'src>),
     VarAssign(&'src str, Expression<'src>),
@@ -30,7 +30,7 @@ pub enum Statement<'src> {
     Return(Option<Expression<'src>>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FnDecl<'src> {
     pub(crate) name: &'src str,
     pub(crate) params: Vec<VarDecl>,
@@ -41,13 +41,13 @@ pub struct FnDecl<'src> {
 /// Variable declaration with associated type.
 /// Since WebAssembly is strict about type, we need to keep track of type for each slot
 /// in function arguments and local variables.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VarDecl {
     pub(crate) name: String,
     pub(crate) ty: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct For<'src> {
     pub(crate) name: &'src str,
     pub(crate) start: Expression<'src>,
@@ -141,6 +141,22 @@ fn fn_call<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Expression<'a>> {
         return Err("FnInvoke is not closed".to_string());
     };
     return Ok((r, Expression::FnInvoke(name, args)));
+}
+
+#[test]
+fn test_fn_call() {
+    let source = "f_x(x, y)";
+    let ast = expression(source);
+    assert_eq!(
+        ast,
+        Ok((
+            "",
+            Expression::FnInvoke(
+                "f_x",
+                vec![Expression::Variable("x"), Expression::Variable("y")]
+            )
+        ))
+    );
 }
 
 fn factor(i: &str) -> Result<(&str, Expression), String> {

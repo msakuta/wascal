@@ -1,0 +1,9 @@
+let hello() = {
+    for y in 0 to 10 {
+        for x in 0 to 13 {
+            set_fill_style(x * 20, y * 25, 127);
+            rectangle(x * 20 + 10, y * 25 + 10, 15, 20);
+        }
+    }
+    0
+}
