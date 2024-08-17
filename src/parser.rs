@@ -1,9 +1,9 @@
-use crate::model::Type;
+use crate::model::{Type, TypeSet};
 
 #[derive(Debug, PartialEq)]
 pub enum Expression<'src> {
-    LiteralI32(i32),
-    LiteralF64(f64),
+    LiteralInt(i64, TypeSet),
+    LiteralFloat(f64, TypeSet),
     Variable(&'src str),
     FnInvoke(&'src str, Vec<Expression<'src>>),
     Neg(Box<Expression<'src>>),
@@ -22,7 +22,7 @@ pub enum Expression<'src> {
 
 #[derive(Debug, PartialEq)]
 pub enum Statement<'src> {
-    VarDecl(&'src str, Type, Expression<'src>),
+    VarDecl(&'src str, TypeSet, Expression<'src>),
     VarAssign(&'src str, Expression<'src>),
     Expr(Expression<'src>),
     FnDecl(FnDecl<'src>),
@@ -36,7 +36,7 @@ pub struct FnDecl<'src> {
     pub(crate) name: &'src str,
     pub(crate) params: Vec<VarDecl>,
     pub(crate) stmts: Vec<Statement<'src>>,
-    pub(crate) ret_ty: Type,
+    pub(crate) ret_ty: TypeSet,
     pub(crate) public: bool,
 }
 
@@ -46,7 +46,7 @@ pub struct FnDecl<'src> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct VarDecl {
     pub(crate) name: String,
-    pub(crate) ty: Type,
+    pub(crate) ty: TypeSet,
 }
 
 #[derive(Debug, PartialEq)]
@@ -69,10 +69,16 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
         let slice = &start[..(input.as_ptr() as usize - start.as_ptr() as usize)];
         if slice.contains('.') {
             let num = slice.parse::<f64>().map_err(|s| s.to_string())?;
-            Ok((input, Expression::LiteralF64(num)))
+            Ok((
+                input,
+                Expression::LiteralFloat(num, TypeSet::F32 | TypeSet::F64),
+            ))
         } else {
-            let num = slice.parse::<i32>().map_err(|s| s.to_string())?;
-            Ok((input, Expression::LiteralI32(num)))
+            let num = slice.parse::<i64>().map_err(|s| s.to_string())?;
+            Ok((
+                input,
+                Expression::LiteralInt(num, TypeSet::I32 | TypeSet::I64),
+            ))
         }
     } else {
         Err("Not a number".to_string())
@@ -83,7 +89,10 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
 fn test_uneg() {
     assert!(matches!(
         num_literal("-2.5"),
-        Ok(("", Expression::LiteralF64(-2.5)))
+        Ok((
+            "",
+            Expression::LiteralFloat(-2.5, TypeSet::F32 | TypeSet::F64)
+        ))
     ));
 }
 
@@ -377,9 +386,9 @@ fn decl_ty(i: &str) -> IResult<&str, Type> {
 fn fn_param(i: &str) -> IResult<&str, VarDecl> {
     let (r, param_name) = identifier(space(i))?;
     let (r, ty) = if let Ok((r, ty)) = decl_ty(space(r)) {
-        (r, ty)
+        (r, ty.into())
     } else {
-        (r, Type::I32)
+        (r, TypeSet::ALL)
     };
     Ok((
         r,
@@ -407,7 +416,6 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
     };
     let (r, _) = recognize("let")(r)?;
     let (r, name) = identifier(space1(r)?)?;
-    dbg!(public, name);
 
     if let Ok((mut r, _)) = recognize("(")(space(r)) {
         let mut params = vec![];
@@ -430,7 +438,7 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
             );
         };
 
-        let (r, ret_ty) = fn_ret_ty(r).unwrap_or((r, Type::I32));
+        let (r, ret_ty) = fn_ret_ty(r).map_or((r, TypeSet::ALL), |(r, ty)| (r, TypeSet::from(ty)));
 
         let Ok((r, _)) = recognize("=")(space(r)) else {
             return Err("Syntax error in func decl: = could not be found".to_string());
@@ -450,7 +458,7 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
         ));
     }
 
-    let (r, ty) = decl_ty(r).unwrap_or((r, Type::I32));
+    let (r, ty) = decl_ty(r).map_or((r, TypeSet::ALL), |(r, ty)| (r, ty.into()));
 
     let Ok((r, _)) = recognize("=")(space(r)) else {
         return Err("Syntax error in var decl".to_string());

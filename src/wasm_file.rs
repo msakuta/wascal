@@ -1,10 +1,11 @@
 //! Code to write wasm file format sections.
 use crate::{
     compiler::{disasm_func, encode_leb128, Compiler},
+    infer::{get_type_infer_fns, TypeInferer},
     model::{FuncDef, FuncImport, FuncType},
     parser::{parse, FnDecl, Statement},
 };
-use std::{error::Error, io::Write};
+use std::{collections::HashMap, error::Error, io::Write};
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
@@ -79,7 +80,20 @@ fn codegen(
     imports: &[FuncImport],
     mut disasm_f: Option<&mut dyn Write>,
 ) -> CompileResult<Vec<FuncDef>> {
-    let stmts = parse(&source).unwrap();
+    let mut stmts = parse(&source).unwrap();
+
+    let mut type_infer_funcs = HashMap::new();
+    for stmt in &stmts {
+        get_type_infer_fns(stmt, &mut type_infer_funcs);
+    }
+
+    for stmt in &mut stmts {
+        println!("type inferring");
+        let mut inferer = TypeInferer::new(&type_infer_funcs);
+        inferer
+            .infer_type_stmt(stmt)
+            .map_err(|e| CompileError::Compile(e))?;
+    }
 
     println!("ast: {stmts:?}");
 
@@ -106,8 +120,22 @@ fn codegen(
     for func_stmt in &func_stmts {
         let ty = types.len();
         types.push(FuncType {
-            params: func_stmt.params.iter().map(|param| param.ty).collect(),
-            results: vec![func_stmt.ret_ty],
+            params: func_stmt
+                .params
+                .iter()
+                .map(|param| param.ty.determine())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    CompileError::Compile(
+                        "Function argument type could not be determined".to_string(),
+                    )
+                })?,
+            results: vec![func_stmt.ret_ty.determine().ok_or_else(|| {
+                CompileError::Compile(format!(
+                    "Function return type could not be determined: {}",
+                    func_stmt.ret_ty
+                ))
+            })?],
         });
         let func = FuncDef {
             name: func_stmt.name.to_string(),
@@ -237,7 +265,15 @@ fn code_single(fun: &FuncDef, types: &[FuncType]) -> std::io::Result<Vec<u8>> {
             if let Some(last) = last {
                 if 0 < run_length {
                     encode_leb128(&mut buf, run_length)?;
-                    buf.push(last.code());
+                    buf.push(
+                        last.determine()
+                            .ok_or_else(|| {
+                                std::io::Error::other(
+                                    "Param type could not be determined".to_string(),
+                                )
+                            })?
+                            .code(),
+                    );
                     chunks += 1;
                 }
             }
@@ -249,7 +285,13 @@ fn code_single(fun: &FuncDef, types: &[FuncType]) -> std::io::Result<Vec<u8>> {
     if let Some(last) = last {
         if 0 < run_length {
             encode_leb128(&mut buf, run_length)?;
-            buf.push(last.code());
+            buf.push(
+                last.determine()
+                    .ok_or_else(|| {
+                        std::io::Error::other("Return type could not be determined".to_string())
+                    })?
+                    .code(),
+            );
             chunks += 1;
         }
     }

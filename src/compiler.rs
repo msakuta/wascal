@@ -20,6 +20,8 @@ pub(crate) enum OpCode {
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Const = 0x41,
+    I64Const = 0x42,
+    F32Const = 0x43,
     F64Const = 0x44,
     I32LtS = 0x48,
     I32LtU = 0x49,
@@ -93,7 +95,11 @@ macro_rules! impl_op_from {
 impl_op_from!(
     Block: "block", Loop: "loop", If: "if", Else: "else", End: "end", Br: "br", BrIf: "br_if",
     Return: "return", Call: "call", Drop: "drop",
-    LocalGet: "local.get", LocalSet: "local.set", I32Const: "i32.const", F64Const: "f64.const",
+    LocalGet: "local.get", LocalSet: "local.set",
+    I32Const: "i32.const",
+    I64Const: "i64.const",
+    F32Const: "f32.const",
+    F64Const: "f64.const",
     I32LtS: "i32.lt_s",
     I32LtU: "i32.lt_u",
     I32GtS: "i32.gt_s",
@@ -179,15 +185,36 @@ impl<'a> Compiler<'a> {
     /// Emit expression code. It produces exactly one value onto the stack, so we don't need to return index
     fn emit_expr(&mut self, ast: &Expression) -> Result<Type, String> {
         match ast {
-            Expression::LiteralI32(num) => {
-                self.code.push(OpCode::I32Const as u8);
+            Expression::LiteralInt(num, ts) => {
+                let ret = match (ts.i32, ts.i64) {
+                    (true, false) => {
+                        self.code.push(OpCode::I32Const as u8);
+                        Type::I32
+                    }
+                    (false, true) => {
+                        self.code.push(OpCode::I64Const as u8);
+                        Type::I64
+                    }
+                    _ => return Err(format!("Literal int type could not be determined: {ts}")),
+                };
                 encode_sleb128(&mut self.code, *num).unwrap();
-                Ok(Type::I32)
+                Ok(ret)
             }
-            Expression::LiteralF64(num) => {
-                self.code.push(OpCode::F64Const as u8);
-                self.code.write_all(&num.to_le_bytes()).unwrap();
-                Ok(Type::F64)
+            Expression::LiteralFloat(num, ts) => {
+                let ret = match (ts.f32, ts.f64) {
+                    (true, false) => {
+                        self.code.push(OpCode::F32Const as u8);
+                        self.code.write_all(&(*num as f32).to_le_bytes()).unwrap();
+                        Type::F32
+                    }
+                    (false, true) => {
+                        self.code.push(OpCode::F64Const as u8);
+                        self.code.write_all(&num.to_le_bytes()).unwrap();
+                        Type::F64
+                    }
+                    _ => return Err(format!("Literal float type could not be determined: {ts}")),
+                };
+                Ok(ret)
             }
             Expression::Variable(name) => {
                 let (ret, local) = self
@@ -196,7 +223,7 @@ impl<'a> Compiler<'a> {
                     .enumerate()
                     .find(|(_, local)| &local.name == name)
                     .ok_or_else(|| format!("Variable {name} not found"))?;
-                let ty = local.ty;
+                let ty = local.ty.determine().unwrap();
                 self.local_get(ret);
                 Ok(ty)
             }
@@ -396,12 +423,13 @@ impl<'a> Compiler<'a> {
             Statement::Expr(ex) => self.emit_expr(ex),
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.emit_expr(ex)?;
-                self.coerce_type(*ty, ex_ty).map_err(|_| {
+                let ty = ty.determine().unwrap();
+                self.coerce_type(ty, ex_ty).map_err(|_| {
                     format!(
-                        "Variable declared type {ty:?} and initializer type {ex:?} are different"
+                        "Variable declared type {ty:?} and initializer type {ex_ty:?} are different"
                     )
                 })?;
-                self.add_local(*name, *ty);
+                self.add_local(*name, ty);
                 Ok(Type::Void)
             }
             Statement::VarAssign(name, ex) => {
@@ -499,7 +527,7 @@ impl<'a> Compiler<'a> {
         encode_leb128(&mut self.code, ret as i32).unwrap();
         self.locals.push(VarDecl {
             name: name.into(),
-            ty,
+            ty: ty.into(),
         });
         ret
     }
@@ -540,7 +568,8 @@ fn test_leb128() {
     assert_eq!(v, vec![0x80, 0x02]);
 }
 
-pub(crate) fn encode_sleb128(f: &mut impl Write, mut value: i32) -> std::io::Result<()> {
+pub(crate) fn encode_sleb128(f: &mut impl Write, value: impl Into<i64>) -> std::io::Result<()> {
+    let mut value = value.into();
     let mut more = true;
     while more {
         let mut byte = (value & 0x7f) as u8;
@@ -661,6 +690,16 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
             I32Const => {
                 let arg = decode_sleb128(&mut cur)?;
                 writeln!(f, "{indent}i32.const {arg}")?;
+            }
+            I64Const => {
+                let arg = decode_sleb128(&mut cur)?;
+                writeln!(f, "{indent}i64.const {arg}")?;
+            }
+            F32Const => {
+                let mut buf = [0u8; std::mem::size_of::<f32>()];
+                cur.read_exact(&mut buf)?;
+                let arg = f32::from_le_bytes(buf);
+                writeln!(f, "{indent}f32.const {arg}")?;
             }
             F64Const => {
                 let mut buf = [0u8; std::mem::size_of::<f64>()];

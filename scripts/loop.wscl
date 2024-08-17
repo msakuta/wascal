@@ -1,4 +1,4 @@
-pub let loop(x) = {
+pub let loop(x: i32) -> i32 = {
     let ret = 0;
     for i in 1 to x {
         ret = ret + i;
