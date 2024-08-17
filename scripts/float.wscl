@@ -1,1 +1,1 @@
-let hello(x: f64, y: f64) -> f64 = x * 10. + y
+pub let hello(x: f64, y: f64) -> f64 = x * 10. + y

@@ -1,7 +1,5 @@
-let fibo(x) = if x < 2 {
+pub let fibo(x) = if x < 2 {
     1
 } else {
     fibo(x - 1) + fibo(x - 2)
 };
-
-let hello(x) = fibo(x);

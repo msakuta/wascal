@@ -77,4 +77,5 @@ pub(crate) struct FuncDef {
     pub ty: usize,
     pub code: Vec<u8>,
     pub locals: Vec<VarDecl>,
+    pub public: bool,
 }

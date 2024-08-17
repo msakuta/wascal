@@ -1,4 +1,4 @@
-let hello(x) = {
+pub let main(x) = {
     putc(x);
     x
 }

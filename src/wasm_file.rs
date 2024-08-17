@@ -114,6 +114,7 @@ fn codegen(
             ty,
             code: vec![],
             locals: vec![],
+            public: func_stmt.public,
         };
 
         funcs.push(func);
@@ -267,9 +268,12 @@ fn export_section(funcs: &[FuncDef], imports: &[FuncImport]) -> std::io::Result<
     let mut buf: Vec<u8> = vec![];
     let mut writer = std::io::Cursor::new(&mut buf);
 
-    encode_leb128(&mut writer, funcs.len() as i32)?;
+    encode_leb128(
+        &mut writer,
+        funcs.iter().filter(|f| f.public).count() as i32,
+    )?;
 
-    for (i, fun) in funcs.iter().enumerate() {
+    for (i, fun) in funcs.iter().enumerate().filter(|(_, f)| f.public) {
         write_string(&mut writer, &fun.name)?;
         encode_leb128(&mut writer, 0)?; //export kind
         encode_leb128(&mut writer, (i + imports.len()) as i32)?;

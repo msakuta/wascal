@@ -12,7 +12,8 @@ pub fn parse_ast(source: &str) -> Result<String, JsValue> {
 pub fn compile(source: &str) -> Result<Vec<u8>, JsValue> {
     let (mut types, imports) = default_imports();
     let mut buf = vec![];
-    compile_wasm(&mut buf, source, &mut types, &imports, None).map_err(|e| JsValue::from(format!("{e}")))?;
+    compile_wasm(&mut buf, source, &mut types, &imports, None)
+        .map_err(|e| JsValue::from(format!("{e}")))?;
     Ok(buf)
 }
 
@@ -20,23 +21,26 @@ pub fn compile(source: &str) -> Result<Vec<u8>, JsValue> {
 pub fn disasm(source: &str) -> Result<String, JsValue> {
     let (mut types, imports) = default_imports();
     let mut buf = vec![];
-    disasm_wasm(&mut buf, source, &mut types, &imports).map_err(|e| JsValue::from(format!("{e}")))?;
+    disasm_wasm(&mut buf, source, &mut types, &imports)
+        .map_err(|e| JsValue::from(format!("{e}")))?;
     String::from_utf8(buf).map_err(|e| JsValue::from(format!("Utf8 error: {e}")))
 }
 
 fn default_imports() -> (Vec<FuncType>, Vec<FuncImport>) {
-    let types = vec![FuncType {
-        params: vec![Type::I32],
-        results: vec![Type::I32],
-    },
-    FuncType {
-        params: vec![Type::I32, Type::I32, Type::I32],
-        results: vec![],
-    },
-    FuncType {
-        params: vec![Type::I32, Type::I32, Type::I32, Type::I32],
-        results: vec![],
-    }];
+    let types = vec![
+        FuncType {
+            params: vec![Type::I32],
+            results: vec![Type::I32],
+        },
+        FuncType {
+            params: vec![Type::I32, Type::I32, Type::I32],
+            results: vec![],
+        },
+        FuncType {
+            params: vec![Type::I32, Type::I32, Type::I32, Type::I32],
+            results: vec![],
+        },
+    ];
 
     let imports = vec![
         FuncImport {

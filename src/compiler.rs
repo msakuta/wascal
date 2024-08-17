@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use crate::{
     model::{FuncDef, FuncImport, FuncType, Type},
-    parser::{Expression, FnDecl, For, Statement, VarDecl},
+    parser::{Expression, For, Statement, VarDecl},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -386,28 +386,8 @@ impl<'a> Compiler<'a> {
                 encode_leb128(&mut self.code, idx as i32).unwrap();
                 Ok(false)
             }
-            Statement::FnDecl(FnDecl {
-                name,
-                params,
-                stmts,
-                ret_ty,
-            }) => {
-                let mut compiler =
-                    Compiler::new(params.clone(), self.types, self.imports, self.funcs);
-                compiler.compile(stmts)?;
-                let code = compiler.get_code().to_vec();
-                let locals = compiler.get_locals().to_vec();
-                let fn_def = FuncDef {
-                    name: name.to_string(),
-                    ty: self.types.len(),
-                    code,
-                    locals,
-                };
-                self.types.push(FuncType {
-                    params: params.iter().map(|_| Type::I32).collect(),
-                    results: vec![*ret_ty],
-                });
-                self.funcs.push(fn_def);
+            Statement::FnDecl(_) => {
+                // We do not compile sub at this point.
                 Ok(false)
             }
             Statement::For(For {
@@ -691,8 +671,11 @@ pub fn disasm_func(
 
     writeln!(
         out,
-        "Disasm {}({}) -> {}: ",
-        func.name, params, func_ty.results[0]
+        "Disasm {}{}({}) -> {}: ",
+        if func.public { "pub " } else { "" },
+        func.name,
+        params,
+        func_ty.results[0]
     )?;
     let locals = &func.locals[func_ty.params.len()..];
     let locals = locals

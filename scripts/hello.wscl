@@ -1,1 +1,1 @@
-let hello(x, y) = x * 10 + y
+pub let hello(x, y) = x * 10 + y

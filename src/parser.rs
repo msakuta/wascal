@@ -36,6 +36,7 @@ pub struct FnDecl<'src> {
     pub(crate) params: Vec<VarDecl>,
     pub(crate) stmts: Vec<Statement<'src>>,
     pub(crate) ret_ty: Type,
+    pub(crate) public: bool,
 }
 
 /// Variable declaration with associated type.
@@ -95,11 +96,25 @@ fn peek_char(input: &str) -> Option<char> {
     input.chars().next()
 }
 
+/// Matches zero or more spaces. Used for skipping potential spaces.
 fn space(mut i: &str) -> &str {
     while peek_char(i).is_some_and(|c| c.is_whitespace()) {
         i = advance_char(i);
     }
     i
+}
+
+/// Matches one or more spaces. Used when a space is expected, e.g. after an identifier.
+fn space1(mut i: &str) -> Result<&str, String> {
+    let c = peek_char(i).ok_or_else(|| "Expected one or more spaces")?;
+    if !c.is_whitespace() {
+        return Err("Expected a whitespace".to_string());
+    }
+    i = advance_char(i);
+    while peek_char(i).is_some_and(|c| c.is_whitespace()) {
+        i = advance_char(i);
+    }
+    Ok(i)
 }
 
 fn identifier(mut input: &str) -> Result<(&str, &str), String> {
@@ -374,6 +389,72 @@ fn fn_ret_ty(i: &str) -> IResult<&str, Type> {
     Ok((r, ty.try_into()?))
 }
 
+fn let_binding(i: &str) -> IResult<&str, Statement> {
+    let public;
+    let r = if let Ok((r, _)) = recognize("pub")(space(i)) {
+        public = true;
+        space1(r)?
+    } else {
+        public = false;
+        space(i)
+    };
+    let (r, _) = recognize("let")(r)?;
+    let (r, name) = identifier(space1(r)?)?;
+    dbg!(public, name);
+
+    if let Ok((mut r, _)) = recognize("(")(space(r)) {
+        let mut params = vec![];
+
+        loop {
+            let Ok((next_r, param)) = fn_param(r) else {
+                break;
+            };
+            params.push(param);
+            r = next_r;
+            let Ok((next_r, _)) = recognize(",")(space(r)) else {
+                break;
+            };
+            r = next_r;
+        }
+
+        let Ok((r, _)) = recognize(")")(space(r)) else {
+            return Err(
+                "Syntax error in func decl: closing parenthesis could not be found".to_string(),
+            );
+        };
+
+        let (r, ret_ty) = fn_ret_ty(r).unwrap_or((r, Type::I32));
+
+        let Ok((r, _)) = recognize("=")(space(r)) else {
+            return Err("Syntax error in func decl: = could not be found".to_string());
+        };
+
+        let (r, stmts) = statement(r)?;
+
+        return Ok((
+            r,
+            Statement::FnDecl(FnDecl {
+                name,
+                params,
+                stmts: vec![stmts],
+                ret_ty,
+                public,
+            }),
+        ));
+    }
+
+    let (r, ty) = decl_ty(r).unwrap_or((r, Type::I32));
+
+    let Ok((r, _)) = recognize("=")(space(r)) else {
+        return Err("Syntax error in var decl".to_string());
+    };
+    let (r, ex) = expression(r)?;
+    if let Ok((r, _)) = recognize(";")(space(r)) {
+        return Ok((r, Statement::VarDecl(name, ty, ex)));
+    }
+    return Ok((r, Statement::VarDecl(name, ty, ex)));
+}
+
 fn statement(i: &str) -> Result<(&str, Statement), String> {
     let r = space(i);
 
@@ -391,59 +472,8 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
         return Ok((r, Statement::Return(ex)));
     }
 
-    if let Ok((r, _)) = recognize("let")(r) {
-        let (r, name) = identifier(space(r))?;
-
-        if let Ok((mut r, _)) = recognize("(")(space(r)) {
-            let mut params = vec![];
-
-            loop {
-                let Ok((next_r, param)) = fn_param(r) else {
-                    break;
-                };
-                params.push(param);
-                r = next_r;
-                let Ok((next_r, _)) = recognize(",")(space(r)) else {
-                    break;
-                };
-                r = next_r;
-            }
-
-            let Ok((r, _)) = recognize(")")(space(r)) else {
-                return Err(
-                    "Syntax error in func decl: closing parenthesis could not be found".to_string(),
-                );
-            };
-
-            let (r, ret_ty) = fn_ret_ty(r).unwrap_or((r, Type::I32));
-
-            let Ok((r, _)) = recognize("=")(space(r)) else {
-                return Err("Syntax error in func decl: = could not be found".to_string());
-            };
-
-            let (r, stmts) = statement(r)?;
-
-            return Ok((
-                r,
-                Statement::FnDecl(FnDecl {
-                    name,
-                    params,
-                    stmts: vec![stmts],
-                    ret_ty,
-                }),
-            ));
-        }
-
-        let (r, ty) = decl_ty(r).unwrap_or((r, Type::I32));
-
-        let Ok((r, _)) = recognize("=")(space(r)) else {
-            return Err("Syntax error in var decl".to_string());
-        };
-        let (r, ex) = expression(r)?;
-        if let Ok((r, _)) = recognize(";")(space(r)) {
-            return Ok((r, Statement::VarDecl(name, ty, ex)));
-        }
-        return Ok((r, Statement::VarDecl(name, ty, ex)));
+    if let Ok(res) = let_binding(r) {
+        return Ok(res);
     }
 
     if let Ok((r, stmt)) = var_assign(r) {
