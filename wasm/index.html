@@ -79,11 +79,95 @@
             <h2>Built-in functions</h2>
 
             <ul>
-            <li>log(value) - Prints a value to JavaScript console (console.log).</li>
-            <li>putc(char) - Puts a single character, specified by ascii code, to the output console.</li>
+            <li>log(value: i32) - Prints a value to JavaScript console (console.log).</li>
+            <li>putc(char: i32) - Puts a single character, specified by ascii code, to the output console.</li>
             <li>set_fill_style(r: i32, g: i32, b: i32) - Sets fill color for painting on the canvas.</li>
             <li>rectangle(x: i32, y: i32, width: i32, height: i32) - Draws a filled rectangle on the canvas.</li>
             </ul>
+
+            <h2>Syntax</h2>
+            The syntax is inspired a bit by functional languages, although the execution model is imperative.
+            <h3>Variable declaration</h3>
+            <p>
+                Variables are declared with <tt>let</tt> keyword like below.
+            </p>
+
+            <pre>
+let x: i32 = 42;
+            </pre>
+
+            <p>
+            If the type is omitted, it is assumed to be <tt>i32</tt>.
+            </p>
+
+            <h3>Function definition</h3>
+            <p>
+            Functions are declared with <tt>let</tt> keyword too, but it can have parameters in parentheses.
+            </p>
+
+            <pre>
+let add(x: i32, y: i32) -> i32 = x + y;
+            </pre>
+
+            <p>
+            If the types of the parameters or the returned value is omitted, it is assumed to be <tt>i32</tt>.
+            </p>
+
+            <p>
+            You can put <tt>pub</tt> keyword in front of a function definition to denote exported functions from Wasm module.
+            Please note that if you don't put <tt>pub</tt>, it won't be visible from the environment thus not directly callable.
+            </p>
+
+            <pre>
+pub let main() = add(1, 2);
+            </pre>
+
+            <h3>Brace statement</h3>
+            <p>
+            Braces can group multiple statements together.
+            You can use it as the container of a function body made of multiple statements, although you don't have to
+            if your function is entirely made of a single expression.
+            The value of the statement is the last statement in the brace.
+            </p>
+
+            <pre>
+pub let main(x) = {
+    log(x + 42);
+    42
+}
+            </pre>
+
+            <h3>If expression</h3>
+            Conditional branching is done by <tt>if</tt> expression.
+            Each branch can contain multiple statements and yields the last statement's value like a brace statement.
+
+            <pre>
+let abs(x) = if x < 0 { -x } else { x };
+            </pre>
+
+            <h3>For statement</h3>
+            <tt>for</tt> statement looks like Rust's, but you need to put start and end indices as <tt>start to end</tt>.
+            <tt>start</tt> and <tt>end</tt> indices must be i32.
+            You can put multiple statements in <tt>for</tt> statement,
+            but the last statement is not used, unlike <tt>if</tt> expression.
+
+            <pre>
+for i in 1 to x {
+    log(i);
+}
+            </pre>
+
+            <p>
+            You can <tt>break</tt> in a statement.
+            </p>
+
+            <pre>
+for i in 1 to x {
+    if 10 < i {
+        break
+    };
+}
+            </pre>
 
             <h2 id="Time">Time measurement resolution</h2>
             Due to security reasons, your browser may have reduced time resolution for measurement.
