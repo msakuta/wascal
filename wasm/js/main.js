@@ -62,7 +62,7 @@ const opts = {
         set_fill_style: (r, g, b) => {
             const canvas = document.getElementById("canvas");
             const ctx = canvas.getContext('2d');
-            const toDigits = x => x < 16 ? `0${x.toString(16)}` : x.toString(16);
+            const toDigits = x => x < 16 ? `0${x.toString(16)}` : 255 < x ? 'ff' : x.toString(16);
             ctx.fillStyle = `#${toDigits(r)}${toDigits(g)}${toDigits(b)}`;
         },
         rectangle: (x0, y0, x1, y1) => {
@@ -139,7 +139,7 @@ const samples = document.getElementById("samples");
     "hello.wscl", "fact.wscl", "fibo.wscl", "float.wscl",
     "funcs.wscl", "log.wscl", "loop.wscl",
     "mandel.wscl",
-    "canvas.wscl",
+    "canvas.wscl", "mandel_canvas.wscl",
 ]
     .forEach(fileName => {
     const link = document.createElement("a");

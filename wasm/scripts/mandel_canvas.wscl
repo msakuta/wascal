@@ -1,0 +1,43 @@
+let printdensity(d) = {
+  if d > 127 {
+    putc(32)
+  } else if d > 8 {
+    putc(46)
+  } else if d > 4 {
+    putc(43)
+  } else {
+    putc(42)
+  }
+}
+
+let mandelconverge(creal: f64, cimag: f64) = {
+    let r: f64 = creal;
+    let i: f64 = cimag;
+    for iter in 0 to 255 {
+        if r*r + i*i > 4. {
+            return iter;
+        };
+        let next_r: f64 = r * r - i * i + creal;
+        i = 2. * r * i + cimag;
+        r = next_r;
+    }
+    255
+}
+
+let mandel(xmin: f64, ymin: f64, xstep: f64, ystep: f64, xsteps: f64, ysteps: f64) = {
+    let xmax: f64 = xmin + xstep * xsteps;
+    let ymax: f64 = ymin + ystep * ysteps;
+    let ixsteps: i32 = xsteps;
+    let iysteps: i32 = ysteps;
+    for iy in 0 to ysteps {
+        let y: f64 = iy * (ymax - ymin) * ystep + ymin;
+        for ix in 0 to xsteps {
+            let x: f64 = ix * (xmax - xmin) * xstep + xmin;
+            set_fill_style(ix * 255 / ixsteps, mandelconverge(x,y), iy * 255 / iysteps);
+            rectangle(ix * 2, iy * 2, 2, 2);
+        }
+    }
+    0
+}
+
+let hello() = mandel(-2.0, -2.0, 0.05 / 4., 0.05 / 4., 160., 160.);
