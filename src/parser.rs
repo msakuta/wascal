@@ -6,6 +6,7 @@ pub enum Expression<'src> {
     LiteralF64(f64),
     Variable(&'src str),
     FnInvoke(&'src str, Vec<Expression<'src>>),
+    Neg(Box<Expression<'src>>),
     Add(Box<Expression<'src>>, Box<Expression<'src>>),
     Sub(Box<Expression<'src>>, Box<Expression<'src>>),
     Mul(Box<Expression<'src>>, Box<Expression<'src>>),
@@ -176,6 +177,12 @@ fn test_fn_call() {
 
 fn factor(i: &str) -> Result<(&str, Expression), String> {
     let r = space(i);
+
+    if let Ok((r, _)) = recognize("-")(r) {
+        let (r, val) = factor(r)?;
+        return Ok((r, Expression::Neg(Box::new(val))));
+    }
+
     if let Ok((r, val)) = num_literal(r) {
         return Ok((r, val));
     }

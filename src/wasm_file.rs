@@ -160,24 +160,23 @@ fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Re
 }
 
 fn types_section(types: &[FuncType]) -> std::io::Result<Vec<u8>> {
-    let mut types_buf: Vec<u8> = vec![];
-    let mut types_writer = std::io::Cursor::new(&mut types_buf);
+    let mut buf: Vec<u8> = vec![];
 
-    types_writer.write_all(&[types.len() as u8])?; //size
+    encode_leb128(&mut buf, types.len() as i32)?; //size
 
     for ty in types {
-        types_writer.write_all(&[0x60])?; //fn
-        types_writer.write_all(&[ty.params.len() as u8])?;
+        buf.write_all(&[0x60])?; //fn
+        encode_leb128(&mut buf, ty.params.len() as i32)?;
         for param in &ty.params {
-            types_writer.write_all(&[param.code()])?;
+            buf.write_all(&[param.code()])?;
         }
-        types_writer.write_all(&[ty.results.len() as u8])?;
+        encode_leb128(&mut buf, ty.results.len() as i32)?;
         for res in &ty.results {
-            types_writer.write_all(&[res.code()])?;
+            buf.write_all(&[res.code()])?;
         }
     }
 
-    Ok(types_buf)
+    Ok(buf)
 }
 
 fn import_section(funcs: &[FuncImport]) -> std::io::Result<Vec<u8>> {

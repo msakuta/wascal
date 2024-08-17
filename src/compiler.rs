@@ -41,10 +41,12 @@ pub(crate) enum OpCode {
     I64Sub = 0x7d,
     I64Mul = 0x7e,
     I64DivS = 0x7f,
+    F32Neg = 0x8c,
     F32Add = 0x92,
     F32Sub = 0x93,
     F32Mul = 0x94,
     F32Div = 0x95,
+    F64Neg = 0x9a,
     F64Add = 0xa0,
     F64Sub = 0xa1,
     F64Mul = 0xa2,
@@ -112,8 +114,8 @@ impl_op_from!(
     I64Sub: "i64.sub",
     I64Mul: "i64.mul",
     I64DivS: "i64.div_s",
-    F32Add: "f32.add", F32Sub: "f32.sub", F32Mul: "f32.mul", F32Div: "f32.div",
-    F64Add: "f64.add", F64Sub: "f64.sub", F64Mul: "f64.mul", F64Div: "f64.div",
+    F32Neg: "f32.neg", F32Add: "f32.add", F32Sub: "f32.sub", F32Mul: "f32.mul", F32Div: "f32.div",
+    F64Neg: "f64.neg", F64Add: "f64.add", F64Sub: "f64.sub", F64Mul: "f64.mul", F64Div: "f64.div",
     I32WrapI64: "i32.wrap_i64",
     I32TruncF32S: "i32.trunc_f32_s",
     I32TruncF64S: "i32.trunc_f32_s",
@@ -159,7 +161,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub fn compile(&mut self, ast: &[Statement]) -> Result<bool, String> {
+    pub fn compile(&mut self, ast: &[Statement]) -> Result<Type, String> {
         // let mut target_stack = vec![];
         let last = self.emit_stmts(ast)?;
         self.code.push(OpCode::End as u8);
@@ -226,6 +228,39 @@ impl<'a> Compiler<'a> {
                 encode_leb128(&mut self.code, idx as i32).unwrap();
                 let fn_ty = &self.types[fn_ty];
                 Ok(fn_ty.results.get(0).copied().unwrap_or(Type::Void))
+            }
+            Expression::Neg(ex) => {
+                match self.emit_expr(ex)? {
+                    // Since i32 and i64 don't have negation opcode, we need to add a local variable and
+                    // subtract it from 0.
+                    Type::I32 => {
+                        let v = self.add_local("", Type::I32);
+                        self.code.push(OpCode::I32Const as u8);
+                        encode_leb128(&mut self.code, 0).unwrap();
+                        self.code.push(OpCode::LocalGet as u8);
+                        encode_leb128(&mut self.code, v as i32).unwrap();
+                        self.code.push(OpCode::I32Sub as u8);
+                        Ok(Type::I32)
+                    }
+                    Type::I64 => {
+                        let v = self.add_local("", Type::I32);
+                        self.code.push(OpCode::I32Const as u8);
+                        encode_leb128(&mut self.code, 0).unwrap();
+                        self.code.push(OpCode::LocalGet as u8);
+                        encode_leb128(&mut self.code, v as i32).unwrap();
+                        self.code.push(OpCode::I32Sub as u8);
+                        Ok(Type::I64)
+                    }
+                    Type::F32 => {
+                        self.code.push(OpCode::F32Neg as u8);
+                        Ok(Type::F32)
+                    }
+                    Type::F64 => {
+                        self.code.push(OpCode::F64Neg as u8);
+                        Ok(Type::F64)
+                    }
+                    Type::Void => Ok(Type::Void),
+                }
             }
             Expression::Add(lhs, rhs) => self.emit_bin_op(
                 lhs,
@@ -299,25 +334,23 @@ impl<'a> Compiler<'a> {
                 let ty_fixup = self.code.len();
                 self.code.push(Type::Void.code());
 
-                let t_branch = self.emit_stmts(t_branch)?;
+                let t_result = self.emit_stmts(t_branch)?;
 
-                if t_branch {
-                    self.code[ty_fixup] = Type::I32.code();
-                }
+                self.code[ty_fixup] = t_result.code();
 
                 if let Some(f_branch) = f_branch {
                     self.code.push(OpCode::Else as u8);
-
-                    if !self.emit_stmts(f_branch)? {
-                        return Err("True branch with yielded value requires false branch to yield a value too".to_string());
+                    let f_result = self.emit_stmts(f_branch)?;
+                    if f_result != t_result {
+                        return Err(format!("True branch type {t_result} and false branch type {f_result} does not match"));
                     }
-                } else if t_branch {
+                } else if t_result != Type::Void {
                     return Err("True branch with yielded value requires false branch".to_string());
                 }
 
                 self.code.push(OpCode::End as u8);
 
-                Ok(if t_branch { Type::I32 } else { Type::Void })
+                Ok(t_result)
             }
         }
     }
@@ -358,12 +391,9 @@ impl<'a> Compiler<'a> {
     }
 
     /// Returns if a value is pushed to the stack
-    fn emit_stmt(&mut self, stmt: &Statement) -> Result<bool, String> {
+    fn emit_stmt(&mut self, stmt: &Statement) -> Result<Type, String> {
         match stmt {
-            Statement::Expr(ex) => {
-                let ty = self.emit_expr(ex)?;
-                Ok(ty != Type::Void)
-            }
+            Statement::Expr(ex) => self.emit_expr(ex),
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.emit_expr(ex)?;
                 self.coerce_type(*ty, ex_ty).map_err(|_| {
@@ -372,7 +402,7 @@ impl<'a> Compiler<'a> {
                     )
                 })?;
                 self.add_local(*name, *ty);
-                Ok(false)
+                Ok(Type::Void)
             }
             Statement::VarAssign(name, ex) => {
                 self.emit_expr(ex)?;
@@ -384,11 +414,11 @@ impl<'a> Compiler<'a> {
                     .ok_or_else(|| format!("Variable {name} not found"))?;
                 self.code.push(OpCode::LocalSet as u8);
                 encode_leb128(&mut self.code, idx as i32).unwrap();
-                Ok(false)
+                Ok(Type::Void)
             }
             Statement::FnDecl(_) => {
-                // We do not compile sub at this point.
-                Ok(false)
+                // We do not compile subfunction at this point.
+                Ok(Type::Void)
             }
             Statement::For(For {
                 name,
@@ -437,7 +467,7 @@ impl<'a> Compiler<'a> {
                 // end block
                 self.code.push(OpCode::End as u8);
 
-                Ok(false)
+                Ok(Type::Void)
             }
             Statement::Brace(stmts) => self.emit_stmts(stmts),
             Statement::Return(ex) => {
@@ -445,22 +475,24 @@ impl<'a> Compiler<'a> {
                     self.emit_expr(ex)?;
                 }
                 self.code.push(OpCode::Return as u8);
-                Ok(false)
+                Ok(Type::Void)
             }
         }
     }
 
-    fn emit_stmts(&mut self, stmts: &[Statement]) -> Result<bool, String> {
-        let mut has_value = false;
+    fn emit_stmts(&mut self, stmts: &[Statement]) -> Result<Type, String> {
+        let mut last_ty = Type::Void;
         for stmt in stmts {
-            if has_value {
+            if last_ty != Type::Void {
                 self.code.push(OpCode::Drop as u8);
             }
-            has_value = self.emit_stmt(stmt)?;
+            last_ty = self.emit_stmt(stmt)?;
         }
-        Ok(has_value)
+        Ok(last_ty)
     }
 
+    /// Add instructions to pop a value from the stack and puts it as a local variable.
+    /// Returns the local index of added local variable.
     fn add_local(&mut self, name: impl Into<String>, ty: Type) -> usize {
         let ret = self.locals.len();
         self.code.push(OpCode::LocalSet as u8);
@@ -637,11 +669,11 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 writeln!(f, "{indent}f64.const {arg}")?;
             }
             I32LtS | I32LtU | I32GtS | I32GtU | I32Add | I32Sub | I32Mul | I32DivS | I64LtS
-            | I64LtU | I64GtS | I64GtU | I64Add | I64Sub | I64Mul | I64DivS | F32Lt | F32Gt
-            | F32Add | F32Sub | F32Mul | F32Div | F64Lt | F64Gt | F64Add | F64Sub | F64Mul
-            | F64Div | I32WrapI64 | I32TruncF32S | I32TruncF64S | I64ExtendI32S | I64TruncF32S
-            | I64TruncF64S | F32ConvertI32S | F32ConvertI64S | F32DemoteF64 | F64ConvertI32S
-            | F64ConvertI64S | F64PromoteF32 => {
+            | I64LtU | I64GtS | I64GtU | I64Add | I64Sub | I64Mul | I64DivS | F32Neg | F32Lt
+            | F32Gt | F32Add | F32Sub | F32Mul | F32Div | F64Neg | F64Lt | F64Gt | F64Add
+            | F64Sub | F64Mul | F64Div | I32WrapI64 | I32TruncF32S | I32TruncF64S
+            | I64ExtendI32S | I64TruncF32S | I64TruncF64S | F32ConvertI32S | F32ConvertI64S
+            | F32DemoteF64 | F64ConvertI32S | F64ConvertI64S | F64PromoteF32 => {
                 writeln!(f, "{indent}{}", code.to_name())?;
             }
             End => {
