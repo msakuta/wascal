@@ -1,7 +1,7 @@
 //! Code to write wasm file format sections.
 use crate::{
     compiler::{disasm_func, encode_leb128, Compiler},
-    infer::{get_type_infer_fns, TypeInferFn, TypeInferer},
+    infer::{get_type_infer_fns, set_infer_debug, TypeInferFn, TypeInferer},
     model::{FuncDef, FuncImport, FuncType, TypeSet},
     parser::{parse, FnDecl, Statement},
 };
@@ -45,11 +45,12 @@ pub fn compile_wasm(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
     disasm_f: Option<&mut dyn Write>,
+    debug_type_infer: bool,
 ) -> CompileResult<()> {
     f.write_all(b"\0asm")?;
     f.write_all(&WASM_BINARY_VERSION)?;
 
-    let funcs = codegen(source, types, imports, disasm_f)?;
+    let funcs = codegen(source, types, imports, disasm_f, debug_type_infer)?;
 
     write_section(f, WASM_TYPE_SECTION, &types_section(&types)?)?;
 
@@ -70,7 +71,7 @@ pub fn disasm_wasm(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
 ) -> CompileResult<()> {
-    let _ = codegen(source, types, imports, Some(f))?;
+    let _ = codegen(source, types, imports, Some(f), false)?;
     Ok(())
 }
 
@@ -79,8 +80,11 @@ fn codegen(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
     mut disasm_f: Option<&mut dyn Write>,
+    debug_type_infer: bool,
 ) -> CompileResult<Vec<FuncDef>> {
     let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
+
+    set_infer_debug(debug_type_infer);
 
     let mut type_infer_funcs = HashMap::new();
     for import_fn in imports {

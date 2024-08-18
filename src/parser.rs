@@ -187,9 +187,7 @@ fn test_fn_call() {
 
 fn postfix_as<'a>(expr: Expression<'a>, i: &'a str) -> IResult<&'a str, Expression<'a>> {
     if let Ok((r, _)) = space1(i).and_then(|r| recognize("as")(r)) {
-        println!("after \"as\": {r}");
         let (r, ty) = identifier(space1(r)?)?;
-        println!("after \"as\" type {ty}: {r}");
         return Ok((r, Expression::Cast(Box::new(expr), Type::try_from(ty)?)));
     }
 

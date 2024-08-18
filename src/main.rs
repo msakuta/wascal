@@ -10,11 +10,16 @@ use wasm_file::compile_wasm;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut f = std::io::BufWriter::new(std::fs::File::create("wascal.wasm")?);
 
-    let arg = std::env::args()
-        .nth(1)
-        .unwrap_or("scripts/hello.wscl".to_string());
+    let mut file_name = "scripts/hello.wscl".to_string();
+    let mut debug_type_infer = false;
+    for arg in std::env::args().skip(1) {
+        match &arg as &str {
+            "-d" => debug_type_infer = true,
+            _ => file_name = arg,
+        }
+    }
 
-    let source = std::fs::read_to_string(arg)?;
+    let source = std::fs::read_to_string(file_name)?;
 
     let mut types = vec![FuncType {
         params: vec![Type::I32],
@@ -40,6 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut types,
         &imports,
         Some(&mut std::io::stdout()),
+        debug_type_infer,
     )?;
 
     Ok(())

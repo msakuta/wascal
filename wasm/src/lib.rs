@@ -14,7 +14,7 @@ pub fn parse_ast(source: &str) -> Result<String, JsValue> {
 pub fn compile(source: &str) -> Result<Vec<u8>, JsValue> {
     let (mut types, imports) = default_imports();
     let mut buf = vec![];
-    compile_wasm(&mut buf, source, &mut types, &imports, None)
+    compile_wasm(&mut buf, source, &mut types, &imports, None, false)
         .map_err(|e| JsValue::from(format!("{e}")))?;
     Ok(buf)
 }
