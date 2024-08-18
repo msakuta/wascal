@@ -130,7 +130,7 @@ document.getElementById("clearCanvas").addEventListener("click", () => {
 });
 
 document.getElementById("input").value = `
-let hello(x, y) = x + y;
+pub let hello(x: i32, y: i32) = x + y;
 `;
 
 const samples = document.getElementById("samples");

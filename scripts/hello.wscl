@@ -1,1 +1,1 @@
-pub let hello(x: i64, y: i64) = x * 10 + y
+pub let hello(x: i32, y: i32) = x * 10 + y

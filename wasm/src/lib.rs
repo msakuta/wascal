@@ -2,6 +2,8 @@ use wasm_bindgen::prelude::*;
 
 use wascal::{compile_wasm, disasm_wasm, parse, FuncImport, FuncType, Type};
 
+use std::io::Write;
+
 #[wasm_bindgen]
 pub fn parse_ast(source: &str) -> Result<String, JsValue> {
     let ast = parse(source).map_err(JsValue::from)?;

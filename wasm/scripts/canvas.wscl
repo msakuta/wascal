@@ -1,4 +1,4 @@
-pub let main() = {
+pub let main() -> i32 = {
     for y in 0 to 10 {
         for x in 0 to 13 {
             set_fill_style(x * 20, y * 25, 127);

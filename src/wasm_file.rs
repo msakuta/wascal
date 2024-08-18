@@ -89,7 +89,10 @@ fn codegen(
             import_fn.name.clone(),
             TypeInferFn {
                 params: func_ty.params.clone(),
-                ret_ty: func_ty.results[0].into(),
+                ret_ty: func_ty
+                    .results
+                    .get(0)
+                    .map_or(TypeSet::default(), |v| (*v).into()),
             },
         );
     }
