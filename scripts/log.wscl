@@ -1,4 +1,4 @@
-pub let main(x) = {
+pub let main(x: i32) -> i32 = {
     log(x + 42);
-    42
+    x
 }

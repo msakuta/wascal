@@ -1,6 +1,6 @@
-let t(s) = {
+let t(s: i32) -> i32 = {
     let v = s * 2;
     v * 2
 }
 
-pub let hello(x, y, z) = t(x) / y + z;
+pub let hello(x: i32, y: i32, z: i32) = t(x) / y + z;

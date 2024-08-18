@@ -20,6 +20,8 @@ pub(crate) enum OpCode {
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Const = 0x41,
+    I64Const = 0x42,
+    F32Const = 0x43,
     F64Const = 0x44,
     I32LtS = 0x48,
     I32LtU = 0x49,
@@ -93,7 +95,11 @@ macro_rules! impl_op_from {
 impl_op_from!(
     Block: "block", Loop: "loop", If: "if", Else: "else", End: "end", Br: "br", BrIf: "br_if",
     Return: "return", Call: "call", Drop: "drop",
-    LocalGet: "local.get", LocalSet: "local.set", I32Const: "i32.const", F64Const: "f64.const",
+    LocalGet: "local.get", LocalSet: "local.set",
+    I32Const: "i32.const",
+    I64Const: "i64.const",
+    F32Const: "f32.const",
+    F64Const: "f64.const",
     I32LtS: "i32.lt_s",
     I32LtU: "i32.lt_u",
     I32GtS: "i32.gt_s",
@@ -137,17 +143,29 @@ struct TypeMap {
     f64: OpCode,
 }
 
+const LT_TYPE_MAP: TypeMap = TypeMap {
+    i32: OpCode::I32LtS,
+    i64: OpCode::I64LtS,
+    f32: OpCode::F32Lt,
+    f64: OpCode::F64Lt,
+};
+
+/// A environment for compiling a function. Note that a program is made of multiple functions,
+/// so you need multiple instances of this object.
 pub struct Compiler<'a> {
     code: Vec<u8>,
     locals: Vec<VarDecl>,
+    ret_ty: Type,
     types: &'a mut Vec<FuncType>,
     imports: &'a [FuncImport],
+    /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
 }
 
 impl<'a> Compiler<'a> {
     pub fn new(
         args: Vec<VarDecl>,
+        ret_ty: Type,
         types: &'a mut Vec<FuncType>,
         imports: &'a [FuncImport],
         funcs: &'a mut Vec<FuncDef>,
@@ -155,15 +173,16 @@ impl<'a> Compiler<'a> {
         Self {
             code: vec![],
             locals: args,
+            ret_ty,
             types,
             imports,
             funcs,
         }
     }
 
-    pub fn compile(&mut self, ast: &[Statement]) -> Result<Type, String> {
+    pub fn compile(&mut self, ast: &[Statement], ty: Type) -> Result<Type, String> {
         // let mut target_stack = vec![];
-        let last = self.emit_stmts(ast)?;
+        let last = self.emit_stmts(ast, ty)?;
         self.code.push(OpCode::End as u8);
         Ok(last)
     }
@@ -179,15 +198,44 @@ impl<'a> Compiler<'a> {
     /// Emit expression code. It produces exactly one value onto the stack, so we don't need to return index
     fn emit_expr(&mut self, ast: &Expression) -> Result<Type, String> {
         match ast {
-            Expression::LiteralI32(num) => {
-                self.code.push(OpCode::I32Const as u8);
+            Expression::LiteralInt(num, ts) => {
+                let ret = match (ts.i32, ts.i64) {
+                    (true, false) => {
+                        self.code.push(OpCode::I32Const as u8);
+                        Type::I32
+                    }
+                    (false, true) => {
+                        self.code.push(OpCode::I64Const as u8);
+                        Type::I64
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Literal int({num}) type could not be determined: {ts}"
+                        ))
+                    }
+                };
                 encode_sleb128(&mut self.code, *num).unwrap();
-                Ok(Type::I32)
+                Ok(ret)
             }
-            Expression::LiteralF64(num) => {
-                self.code.push(OpCode::F64Const as u8);
-                self.code.write_all(&num.to_le_bytes()).unwrap();
-                Ok(Type::F64)
+            Expression::LiteralFloat(num, ts) => {
+                let ret = match (ts.f32, ts.f64) {
+                    (true, false) => {
+                        self.code.push(OpCode::F32Const as u8);
+                        self.code.write_all(&(*num as f32).to_le_bytes()).unwrap();
+                        Type::F32
+                    }
+                    (false, true) => {
+                        self.code.push(OpCode::F64Const as u8);
+                        self.code.write_all(&num.to_le_bytes()).unwrap();
+                        Type::F64
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Literal float({num}) type could not be determined: {ts}"
+                        ))
+                    }
+                };
+                Ok(ret)
             }
             Expression::Variable(name) => {
                 let (ret, local) = self
@@ -196,7 +244,7 @@ impl<'a> Compiler<'a> {
                     .enumerate()
                     .find(|(_, local)| &local.name == name)
                     .ok_or_else(|| format!("Variable {name} not found"))?;
-                let ty = local.ty;
+                let ty = local.ty.determine().unwrap();
                 self.local_get(ret);
                 Ok(ty)
             }
@@ -228,6 +276,11 @@ impl<'a> Compiler<'a> {
                 encode_leb128(&mut self.code, idx as i32).unwrap();
                 let fn_ty = &self.types[fn_ty];
                 Ok(fn_ty.results.get(0).copied().unwrap_or(Type::Void))
+            }
+            Expression::Cast(ex, ty) => {
+                let ex_ty = self.emit_expr(ex)?;
+                self.coerce_type(*ty, ex_ty)?;
+                Ok(*ty)
             }
             Expression::Neg(ex) => {
                 match self.emit_expr(ex)? {
@@ -306,18 +359,8 @@ impl<'a> Compiler<'a> {
                     f64: OpCode::F64Div,
                 },
             ),
-            Expression::Lt(lhs, rhs) => self.emit_bin_op(
-                lhs,
-                rhs,
-                "lt",
-                TypeMap {
-                    i32: OpCode::I32LtS,
-                    i64: OpCode::I64LtS,
-                    f32: OpCode::F32Lt,
-                    f64: OpCode::F64Lt,
-                },
-            ),
-            Expression::Gt(lhs, rhs) => self.emit_bin_op(
+            Expression::Lt(lhs, rhs) => self.emit_cmp_op(lhs, rhs, "lt", LT_TYPE_MAP),
+            Expression::Gt(lhs, rhs) => self.emit_cmp_op(
                 lhs,
                 rhs,
                 "gt",
@@ -334,13 +377,13 @@ impl<'a> Compiler<'a> {
                 let ty_fixup = self.code.len();
                 self.code.push(Type::Void.code());
 
-                let t_result = self.emit_stmts(t_branch)?;
+                let t_result = self.emit_stmts(t_branch, Type::Void)?;
 
                 self.code[ty_fixup] = t_result.code();
 
                 if let Some(f_branch) = f_branch {
                     self.code.push(OpCode::Else as u8);
-                    let f_result = self.emit_stmts(f_branch)?;
+                    let f_result = self.emit_stmts(f_branch, Type::Void)?;
                     if f_result != t_result {
                         return Err(format!("True branch type {t_result} and false branch type {f_result} does not match"));
                     }
@@ -390,18 +433,49 @@ impl<'a> Compiler<'a> {
         Ok(ty)
     }
 
+    fn emit_cmp_op(
+        &mut self,
+        lhs: &Expression,
+        rhs: &Expression,
+        name: &str,
+        ty_map: TypeMap,
+    ) -> Result<Type, String> {
+        let lhs = self.emit_expr(lhs)?;
+        let rhs = self.emit_expr(rhs)?;
+        let op = match (lhs, rhs) {
+            (Type::I32, Type::I32) => ty_map.i32,
+            (Type::I64, Type::I64) => ty_map.i64,
+            (Type::F32, Type::F32) => ty_map.f32,
+            (Type::F64, Type::F64) => ty_map.f64,
+            (Type::I32, Type::F64) => {
+                let lhs_local = self.add_local("", Type::F64);
+                self.code.push(OpCode::F64ConvertI32S as u8);
+                self.local_get(lhs_local);
+                ty_map.f64
+            }
+            (Type::F64, Type::I32) => {
+                self.code.push(OpCode::F64ConvertI32S as u8);
+                ty_map.f64
+            }
+            _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
+        };
+        self.code.push(op as u8);
+        Ok(Type::I32)
+    }
+
     /// Returns if a value is pushed to the stack
-    fn emit_stmt(&mut self, stmt: &Statement) -> Result<Type, String> {
+    fn emit_stmt(&mut self, stmt: &Statement, ty: Type) -> Result<Type, String> {
         match stmt {
             Statement::Expr(ex) => self.emit_expr(ex),
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.emit_expr(ex)?;
-                self.coerce_type(*ty, ex_ty).map_err(|_| {
+                let ty = ty.determine().unwrap();
+                self.coerce_type(ty, ex_ty).map_err(|_| {
                     format!(
-                        "Variable declared type {ty:?} and initializer type {ex:?} are different"
+                        "Variable declared type {ty:?} and initializer type {ex_ty:?} are different"
                     )
                 })?;
-                self.add_local(*name, *ty);
+                self.add_local(*name, ty);
                 Ok(Type::Void)
             }
             Statement::VarAssign(name, ex) => {
@@ -427,12 +501,16 @@ impl<'a> Compiler<'a> {
                 stmts,
             }) => {
                 let start_ty = self.emit_expr(start)?;
-                self.coerce_type(Type::I32, start_ty)?; // For now for loop uses i32 for loop variable
-                let idx = self.add_local(*name, Type::I32);
+                let idx = self.add_local(*name, start_ty);
 
                 let end_ty = self.emit_expr(end)?;
-                self.coerce_type(Type::I32, end_ty)?; // Enough fors
-                let end = self.add_local("", Type::I32);
+                let end = self.add_local("", end_ty);
+
+                if start_ty != end_ty {
+                    return Err(format!(
+                        "Start and end types do not match: {start_ty} and {end_ty}"
+                    ));
+                }
 
                 // Start block
                 self.code.push(OpCode::Block as u8);
@@ -445,16 +523,42 @@ impl<'a> Compiler<'a> {
                 // End condition
                 self.local_get(end);
                 self.local_get(idx);
-                self.code.push(OpCode::I32LtS as u8);
+                self.code.push(match start_ty {
+                    Type::I32 => OpCode::I32LtS,
+                    Type::I64 => OpCode::I64LtS,
+                    Type::F32 => OpCode::F32Lt,
+                    Type::F64 => OpCode::F64Lt,
+                    _ => return Err("For loop iteration variable has void type".to_string()),
+                } as u8);
                 self.code.push(OpCode::BrIf as u8);
                 encode_leb128(&mut self.code, 1).unwrap();
-                self.emit_stmts(stmts)?;
+                self.emit_stmts(stmts, Type::Void)?;
 
                 // Incr idx
                 self.local_get(idx);
-                self.code.push(OpCode::I32Const as u8);
-                encode_leb128(&mut self.code, 1).unwrap();
-                self.code.push(OpCode::I32Add as u8);
+                match start_ty {
+                    Type::I32 => {
+                        self.code.push(OpCode::I32Const as u8);
+                        encode_leb128(&mut self.code, 1).unwrap();
+                        self.code.push(OpCode::I32Add as u8);
+                    }
+                    Type::I64 => {
+                        self.code.push(OpCode::I64Const as u8);
+                        encode_leb128(&mut self.code, 1).unwrap();
+                        self.code.push(OpCode::I64Add as u8);
+                    }
+                    Type::F32 => {
+                        self.code.push(OpCode::F32Const as u8);
+                        self.code.extend_from_slice(&1f32.to_le_bytes());
+                        self.code.push(OpCode::F32Add as u8);
+                    }
+                    Type::F64 => {
+                        self.code.push(OpCode::F64Const as u8);
+                        self.code.extend_from_slice(&1f64.to_le_bytes());
+                        self.code.push(OpCode::F64Add as u8);
+                    }
+                    _ => return Err("For loop iteration variable has void type".to_string()),
+                }
                 self.code.push(OpCode::LocalSet as u8);
                 encode_leb128(&mut self.code, idx as i32).unwrap();
 
@@ -469,10 +573,17 @@ impl<'a> Compiler<'a> {
 
                 Ok(Type::Void)
             }
-            Statement::Brace(stmts) => self.emit_stmts(stmts),
+            Statement::Brace(stmts) => {
+                let res_ty = self.emit_stmts(stmts, ty)?;
+                if res_ty != Type::Void {
+                    self.coerce_type(ty, res_ty)?;
+                }
+                Ok(Type::Void)
+            }
             Statement::Return(ex) => {
                 if let Some(ex) = ex {
-                    self.emit_expr(ex)?;
+                    let ex_ty = self.emit_expr(ex)?;
+                    self.coerce_type(self.ret_ty, ex_ty)?;
                 }
                 self.code.push(OpCode::Return as u8);
                 Ok(Type::Void)
@@ -480,13 +591,21 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn emit_stmts(&mut self, stmts: &[Statement]) -> Result<Type, String> {
+    fn emit_stmts(&mut self, stmts: &[Statement], ty: Type) -> Result<Type, String> {
         let mut last_ty = Type::Void;
-        for stmt in stmts {
+        if 1 <= stmts.len() {
+            for stmt in &stmts[..stmts.len() - 1] {
+                if last_ty != Type::Void {
+                    self.code.push(OpCode::Drop as u8);
+                }
+                last_ty = self.emit_stmt(stmt, Type::Void)?;
+            }
+        }
+        if let Some(last_stmt) = stmts.last() {
             if last_ty != Type::Void {
                 self.code.push(OpCode::Drop as u8);
             }
-            last_ty = self.emit_stmt(stmt)?;
+            last_ty = self.emit_stmt(last_stmt, ty)?;
         }
         Ok(last_ty)
     }
@@ -499,7 +618,7 @@ impl<'a> Compiler<'a> {
         encode_leb128(&mut self.code, ret as i32).unwrap();
         self.locals.push(VarDecl {
             name: name.into(),
-            ty,
+            ty: ty.into(),
         });
         ret
     }
@@ -510,6 +629,8 @@ impl<'a> Compiler<'a> {
             | (Type::I64, Type::I64)
             | (Type::F32, Type::F32)
             | (Type::F64, Type::F64) => {}
+            (Type::I32, Type::I64) => self.code.push(OpCode::I32WrapI64 as u8),
+            (Type::I64, Type::I32) => self.code.push(OpCode::I64ExtendI32S as u8),
             (Type::I32, Type::F64) => self.code.push(OpCode::I32TruncF64S as u8),
             (Type::F64, Type::I32) => self.code.push(OpCode::F64ConvertI32S as u8),
             _ => return Err(format!("Coercing type {ty:?} from type {ex:?} failed")),
@@ -540,7 +661,8 @@ fn test_leb128() {
     assert_eq!(v, vec![0x80, 0x02]);
 }
 
-pub(crate) fn encode_sleb128(f: &mut impl Write, mut value: i32) -> std::io::Result<()> {
+pub(crate) fn encode_sleb128(f: &mut impl Write, value: impl Into<i64>) -> std::io::Result<()> {
+    let mut value = value.into();
     let mut more = true;
     while more {
         let mut byte = (value & 0x7f) as u8;
@@ -661,6 +783,16 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
             I32Const => {
                 let arg = decode_sleb128(&mut cur)?;
                 writeln!(f, "{indent}i32.const {arg}")?;
+            }
+            I64Const => {
+                let arg = decode_sleb128(&mut cur)?;
+                writeln!(f, "{indent}i64.const {arg}")?;
+            }
+            F32Const => {
+                let mut buf = [0u8; std::mem::size_of::<f32>()];
+                cur.read_exact(&mut buf)?;
+                let arg = f32::from_le_bytes(buf);
+                writeln!(f, "{indent}f32.const {arg}")?;
             }
             F64Const => {
                 let mut buf = [0u8; std::mem::size_of::<f64>()];

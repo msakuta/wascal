@@ -1,10 +1,11 @@
 //! Code to write wasm file format sections.
 use crate::{
     compiler::{disasm_func, encode_leb128, Compiler},
-    model::{FuncDef, FuncImport, FuncType},
+    infer::{get_type_infer_fns, TypeInferFn, TypeInferer},
+    model::{FuncDef, FuncImport, FuncType, TypeSet},
     parser::{parse, FnDecl, Statement},
 };
-use std::{error::Error, io::Write};
+use std::{collections::HashMap, error::Error, io::Write};
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
@@ -79,7 +80,33 @@ fn codegen(
     imports: &[FuncImport],
     mut disasm_f: Option<&mut dyn Write>,
 ) -> CompileResult<Vec<FuncDef>> {
-    let stmts = parse(&source).unwrap();
+    let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
+
+    let mut type_infer_funcs = HashMap::new();
+    for import_fn in imports {
+        let func_ty = &types[import_fn.ty];
+        type_infer_funcs.insert(
+            import_fn.name.clone(),
+            TypeInferFn {
+                params: func_ty.params.clone(),
+                ret_ty: func_ty
+                    .results
+                    .get(0)
+                    .map_or(TypeSet::default(), |v| (*v).into()),
+            },
+        );
+    }
+    for stmt in &stmts {
+        get_type_infer_fns(stmt, &mut type_infer_funcs).map_err(|e| CompileError::Compile(e))?;
+    }
+
+    for stmt in &mut stmts {
+        println!("type inferring");
+        let mut inferer = TypeInferer::new(TypeSet::default(), &type_infer_funcs);
+        inferer
+            .infer_type_stmt(stmt)
+            .map_err(|e| CompileError::Compile(e))?;
+    }
 
     println!("ast: {stmts:?}");
 
@@ -106,8 +133,22 @@ fn codegen(
     for func_stmt in &func_stmts {
         let ty = types.len();
         types.push(FuncType {
-            params: func_stmt.params.iter().map(|param| param.ty).collect(),
-            results: vec![func_stmt.ret_ty],
+            params: func_stmt
+                .params
+                .iter()
+                .map(|param| param.ty.determine())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    CompileError::Compile(
+                        "Function argument type could not be determined".to_string(),
+                    )
+                })?,
+            results: vec![func_stmt.ret_ty.determine().ok_or_else(|| {
+                CompileError::Compile(format!(
+                    "Function return type could not be determined: {}",
+                    func_stmt.ret_ty
+                ))
+            })?],
         });
         let func = FuncDef {
             name: func_stmt.name.to_string(),
@@ -121,18 +162,25 @@ fn codegen(
     }
 
     for (i, func_stmt) in func_stmts.iter().enumerate() {
+        let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
+            CompileError::Compile("Could not determine return type by type inference".to_string())
+        })?;
         let mut compiler = Compiler::new(
             func_stmt
                 .params
                 .iter()
                 .map(|param| param.clone())
                 .collect::<Vec<_>>(),
+            ret_ty,
             types,
             &imports,
             &mut funcs,
         );
-        if let Err(e) = compiler.compile(&func_stmt.stmts) {
-            return Err(CompileError::Compile(e));
+        if let Err(e) = compiler.compile(&func_stmt.stmts, ret_ty) {
+            return Err(CompileError::Compile(format!(
+                "Error in compiling function {}: {e}",
+                func_stmt.name
+            )));
         }
 
         let code = compiler.get_code().to_vec();
@@ -237,7 +285,15 @@ fn code_single(fun: &FuncDef, types: &[FuncType]) -> std::io::Result<Vec<u8>> {
             if let Some(last) = last {
                 if 0 < run_length {
                     encode_leb128(&mut buf, run_length)?;
-                    buf.push(last.code());
+                    buf.push(
+                        last.determine()
+                            .ok_or_else(|| {
+                                std::io::Error::other(
+                                    "Param type could not be determined".to_string(),
+                                )
+                            })?
+                            .code(),
+                    );
                     chunks += 1;
                 }
             }
@@ -249,7 +305,13 @@ fn code_single(fun: &FuncDef, types: &[FuncType]) -> std::io::Result<Vec<u8>> {
     if let Some(last) = last {
         if 0 < run_length {
             encode_leb128(&mut buf, run_length)?;
-            buf.push(last.code());
+            buf.push(
+                last.determine()
+                    .ok_or_else(|| {
+                        std::io::Error::other("Return type could not be determined".to_string())
+                    })?
+                    .code(),
+            );
             chunks += 1;
         }
     }

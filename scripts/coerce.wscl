@@ -1,0 +1,10 @@
+
+pub let coerce2_i64() -> i64 = {
+    let x = 42;
+    x
+}
+
+pub let coerce2_f32() -> f32 = {
+    let x = 3.14;
+    x
+}

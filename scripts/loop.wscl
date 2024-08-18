@@ -1,8 +1,10 @@
-pub let loop(x) = {
+let loop(x: i64) -> i32 = {
     let ret = 0;
     for i in 1 to x {
         ret = ret + i;
-        log(ret);
+        log(ret as i32);
     }
-    ret
+    ret as i32
 }
+
+pub let main(x: i32) -> i32 = loop(x as i64);

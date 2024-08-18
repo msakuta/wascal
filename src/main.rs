@@ -1,4 +1,5 @@
 mod compiler;
+mod infer;
 mod model;
 mod parser;
 mod wasm_file;
