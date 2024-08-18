@@ -1,7 +1,7 @@
 //! Code to write wasm file format sections.
 use crate::{
     compiler::{disasm_func, encode_leb128, Compiler},
-    infer::{get_type_infer_fns, TypeInferer},
+    infer::{get_type_infer_fns, TypeInferFn, TypeInferer},
     model::{FuncDef, FuncImport, FuncType},
     parser::{parse, FnDecl, Statement},
 };
@@ -83,8 +83,18 @@ fn codegen(
     let mut stmts = parse(&source).unwrap();
 
     let mut type_infer_funcs = HashMap::new();
+    for import_fn in imports {
+        let func_ty = &types[import_fn.ty];
+        type_infer_funcs.insert(
+            import_fn.name.clone(),
+            TypeInferFn {
+                params: func_ty.params.clone(),
+                ret_ty: func_ty.results[0].into(),
+            },
+        );
+    }
     for stmt in &stmts {
-        get_type_infer_fns(stmt, &mut type_infer_funcs);
+        get_type_infer_fns(stmt, &mut type_infer_funcs).map_err(|e| CompileError::Compile(e))?;
     }
 
     for stmt in &mut stmts {
@@ -159,8 +169,14 @@ fn codegen(
             &imports,
             &mut funcs,
         );
-        if let Err(e) = compiler.compile(&func_stmt.stmts) {
-            return Err(CompileError::Compile(e));
+        let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
+            CompileError::Compile("Could not determine return type by type inference".to_string())
+        })?;
+        if let Err(e) = compiler.compile(&func_stmt.stmts, ret_ty) {
+            return Err(CompileError::Compile(format!(
+                "Error in compiling function {}: {e}",
+                func_stmt.name
+            )));
         }
 
         let code = compiler.get_code().to_vec();

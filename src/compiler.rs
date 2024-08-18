@@ -167,9 +167,9 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub fn compile(&mut self, ast: &[Statement]) -> Result<Type, String> {
+    pub fn compile(&mut self, ast: &[Statement], ty: Type) -> Result<Type, String> {
         // let mut target_stack = vec![];
-        let last = self.emit_stmts(ast)?;
+        let last = self.emit_stmts(ast, ty)?;
         self.code.push(OpCode::End as u8);
         Ok(last)
     }
@@ -333,7 +333,7 @@ impl<'a> Compiler<'a> {
                     f64: OpCode::F64Div,
                 },
             ),
-            Expression::Lt(lhs, rhs) => self.emit_bin_op(
+            Expression::Lt(lhs, rhs) => self.emit_cmp_op(
                 lhs,
                 rhs,
                 "lt",
@@ -344,7 +344,7 @@ impl<'a> Compiler<'a> {
                     f64: OpCode::F64Lt,
                 },
             ),
-            Expression::Gt(lhs, rhs) => self.emit_bin_op(
+            Expression::Gt(lhs, rhs) => self.emit_cmp_op(
                 lhs,
                 rhs,
                 "gt",
@@ -361,13 +361,13 @@ impl<'a> Compiler<'a> {
                 let ty_fixup = self.code.len();
                 self.code.push(Type::Void.code());
 
-                let t_result = self.emit_stmts(t_branch)?;
+                let t_result = self.emit_stmts(t_branch, Type::Void)?;
 
                 self.code[ty_fixup] = t_result.code();
 
                 if let Some(f_branch) = f_branch {
                     self.code.push(OpCode::Else as u8);
-                    let f_result = self.emit_stmts(f_branch)?;
+                    let f_result = self.emit_stmts(f_branch, Type::Void)?;
                     if f_result != t_result {
                         return Err(format!("True branch type {t_result} and false branch type {f_result} does not match"));
                     }
@@ -417,8 +417,38 @@ impl<'a> Compiler<'a> {
         Ok(ty)
     }
 
+    fn emit_cmp_op(
+        &mut self,
+        lhs: &Expression,
+        rhs: &Expression,
+        name: &str,
+        ty_map: TypeMap,
+    ) -> Result<Type, String> {
+        let lhs = self.emit_expr(lhs)?;
+        let rhs = self.emit_expr(rhs)?;
+        let op = match (lhs, rhs) {
+            (Type::I32, Type::I32) => ty_map.i32,
+            (Type::I64, Type::I64) => ty_map.i64,
+            (Type::F32, Type::F32) => ty_map.f32,
+            (Type::F64, Type::F64) => ty_map.f64,
+            (Type::I32, Type::F64) => {
+                let lhs_local = self.add_local("", Type::F64);
+                self.code.push(OpCode::F64ConvertI32S as u8);
+                self.local_get(lhs_local);
+                ty_map.f64
+            }
+            (Type::F64, Type::I32) => {
+                self.code.push(OpCode::F64ConvertI32S as u8);
+                ty_map.f64
+            }
+            _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
+        };
+        self.code.push(op as u8);
+        Ok(Type::I32)
+    }
+
     /// Returns if a value is pushed to the stack
-    fn emit_stmt(&mut self, stmt: &Statement) -> Result<Type, String> {
+    fn emit_stmt(&mut self, stmt: &Statement, ty: Type) -> Result<Type, String> {
         match stmt {
             Statement::Expr(ex) => self.emit_expr(ex),
             Statement::VarDecl(name, ty, ex) => {
@@ -476,7 +506,7 @@ impl<'a> Compiler<'a> {
                 self.code.push(OpCode::I32LtS as u8);
                 self.code.push(OpCode::BrIf as u8);
                 encode_leb128(&mut self.code, 1).unwrap();
-                self.emit_stmts(stmts)?;
+                self.emit_stmts(stmts, Type::Void)?;
 
                 // Incr idx
                 self.local_get(idx);
@@ -497,10 +527,17 @@ impl<'a> Compiler<'a> {
 
                 Ok(Type::Void)
             }
-            Statement::Brace(stmts) => self.emit_stmts(stmts),
+            Statement::Brace(stmts) => {
+                let res_ty = self.emit_stmts(stmts, ty)?;
+                if res_ty != Type::Void {
+                    self.coerce_type(ty, res_ty)?;
+                }
+                Ok(Type::Void)
+            }
             Statement::Return(ex) => {
                 if let Some(ex) = ex {
-                    self.emit_expr(ex)?;
+                    let ex_ty = self.emit_expr(ex)?;
+                    self.coerce_type(ty, ex_ty)?;
                 }
                 self.code.push(OpCode::Return as u8);
                 Ok(Type::Void)
@@ -508,13 +545,19 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn emit_stmts(&mut self, stmts: &[Statement]) -> Result<Type, String> {
+    fn emit_stmts(&mut self, stmts: &[Statement], ty: Type) -> Result<Type, String> {
         let mut last_ty = Type::Void;
-        for stmt in stmts {
+        for stmt in &stmts[..stmts.len() - 1] {
             if last_ty != Type::Void {
                 self.code.push(OpCode::Drop as u8);
             }
-            last_ty = self.emit_stmt(stmt)?;
+            last_ty = self.emit_stmt(stmt, Type::Void)?;
+        }
+        if let Some(last_stmt) = stmts.last() {
+            if last_ty != Type::Void {
+                self.code.push(OpCode::Drop as u8);
+            }
+            last_ty = self.emit_stmt(last_stmt, ty)?;
         }
         Ok(last_ty)
     }
@@ -538,6 +581,8 @@ impl<'a> Compiler<'a> {
             | (Type::I64, Type::I64)
             | (Type::F32, Type::F32)
             | (Type::F64, Type::F64) => {}
+            (Type::I32, Type::I64) => self.code.push(OpCode::I32WrapI64 as u8),
+            (Type::I64, Type::I32) => self.code.push(OpCode::I64ExtendI32S as u8),
             (Type::I32, Type::F64) => self.code.push(OpCode::I32TruncF64S as u8),
             (Type::F64, Type::I32) => self.code.push(OpCode::F64ConvertI32S as u8),
             _ => return Err(format!("Coercing type {ty:?} from type {ex:?} failed")),

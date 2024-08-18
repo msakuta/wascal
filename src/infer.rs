@@ -1,6 +1,6 @@
 //! Implementation of type inference using TypeSet
 
-use std::{collections::HashMap, sync::Condvar};
+use std::collections::HashMap;
 
 use crate::{
     model::TypeSet,
@@ -14,7 +14,10 @@ pub struct TypeInferFn {
     pub(crate) ret_ty: TypeSet,
 }
 
-pub fn get_type_infer_fns(stmt: &Statement, funcs: &mut HashMap<String, TypeInferFn>) {
+pub fn get_type_infer_fns(
+    stmt: &Statement,
+    funcs: &mut HashMap<String, TypeInferFn>,
+) -> Result<(), String> {
     match stmt {
         Statement::FnDecl(fn_decl) => {
             funcs.insert(
@@ -23,14 +26,15 @@ pub fn get_type_infer_fns(stmt: &Statement, funcs: &mut HashMap<String, TypeInfe
                     params: fn_decl
                         .params
                         .iter()
-                        .map(|p| p.ty.determine().unwrap())
-                        .collect(),
+                        .map(|p| p.ty.determine().ok_or_else(|| "Parameter requires a type"))
+                        .collect::<Result<_, _>>()?,
                     ret_ty: fn_decl.ret_ty,
                 },
             );
         }
         _ => {}
     }
+    Ok(())
 }
 
 pub struct TypeInferer<'a> {
@@ -46,7 +50,7 @@ impl<'a> TypeInferer<'a> {
         }
     }
 
-    pub fn infer_type_expr(&mut self, ex: &Expression) -> Result<TypeSet, String> {
+    pub fn forward_type_expr(&mut self, ex: &Expression) -> Result<TypeSet, String> {
         match ex {
             Expression::LiteralInt(_, ts) => Ok(*ts),
             Expression::LiteralFloat(_, ts) => Ok(*ts),
@@ -58,12 +62,13 @@ impl<'a> TypeInferer<'a> {
             Expression::FnInvoke(name, _) => {
                 Ok(self.funcs.get(*name).map_or(TypeSet::ALL, |f| f.ret_ty))
             }
+            Expression::Neg(ex) => self.forward_type_expr(ex),
             Expression::Add(lhs, rhs)
             | Expression::Sub(lhs, rhs)
             | Expression::Mul(lhs, rhs)
             | Expression::Div(lhs, rhs) => {
-                let lhs_ty = self.infer_type_expr(lhs)?;
-                let rhs_ty = self.infer_type_expr(rhs)?;
+                let lhs_ty = self.forward_type_expr(lhs)?;
+                let rhs_ty = self.forward_type_expr(rhs)?;
                 Ok(lhs_ty & rhs_ty)
             }
             Expression::Lt(_, _) | Expression::Gt(_, _) => {
@@ -81,81 +86,147 @@ impl<'a> TypeInferer<'a> {
                 })?;
                 Ok(t_ty & f_ty)
             }
-            _ => Ok(Type::Void.into()),
         }
     }
 
-    fn propagate_type_expr(&mut self, ex: &mut Expression, ts: &TypeSet) {
+    fn propagate_type_expr(&mut self, ex: &mut Expression, ts: &TypeSet) -> Result<(), String> {
         match ex {
             Expression::LiteralInt(_, target_ts) => *target_ts = dbg!(*ts),
             Expression::LiteralFloat(_, target_ts) => *target_ts = *ts,
             Expression::Variable(var) => {
                 if let Some(var) = self.locals.get_mut(*var) {
-                    *var = *ts;
+                    *var = dbg!(*ts);
+                }
+            }
+            Expression::FnInvoke(name, args) => {
+                let func = self
+                    .funcs
+                    .get(*name)
+                    .ok_or_else(|| format!("Function not found: {}", *name))?;
+                for (arg, ts) in args.iter_mut().zip(func.params.iter()) {
+                    self.propagate_type_expr(arg, &(*ts).into())?;
                 }
             }
             Expression::Add(lhs, rhs)
             | Expression::Sub(lhs, rhs)
             | Expression::Mul(lhs, rhs)
             | Expression::Div(lhs, rhs) => {
-                self.propagate_type_expr(lhs, ts);
-                self.propagate_type_expr(rhs, ts);
+                self.propagate_type_expr(lhs, ts)?;
+                self.propagate_type_expr(rhs, ts)?;
             }
-            Expression::Lt(lhs, rhs)
-            | Expression::Gt(lhs, rhs) => {
-                println!("propagate_type_expr");
-                self.propagate_type_expr(lhs, &Type::I32.into());
-                self.propagate_type_expr(rhs, &Type::I32.into());
+            Expression::Lt(lhs, rhs) | Expression::Gt(lhs, rhs) => {
+                println!("propagate_type_expr comp");
+                match (
+                    self.forward_type_expr(lhs)?.determine(),
+                    self.forward_type_expr(rhs)?.determine(),
+                ) {
+                    (Some(lhs), None) => self.propagate_type_expr(dbg!(rhs), &lhs.into())?,
+                    (None, Some(rhs)) => self.propagate_type_expr(dbg!(lhs), &rhs.into())?,
+                    // (Some(lhs), Some(rhs)) => {}
+                    _ => {}
+                }
             }
             Expression::Conditional(cond, t_branch, f_branch) => {
-                self.propagate_type_expr(cond, &Type::I32.into());
-                if let Some(t_stmt) = t_branch
-                    .last_mut() {
-                    self.propagate_type_stmt(t_stmt, ts);
+                self.propagate_type_expr(cond, &Type::I32.into())?;
+                if let Some(t_stmt) = t_branch.last_mut() {
+                    self.propagate_type_stmt(t_stmt, ts)?;
                 }
                 if let Some(f_stmt) = f_branch.as_mut().and_then(|stmts| stmts.last_mut()) {
-                    self.propagate_type_stmt(f_stmt, ts);
+                    self.propagate_type_stmt(f_stmt, ts)?;
                 }
             }
             _ => {}
         }
+        Ok(())
     }
 
-    fn propagate_type_stmt(&mut self, stmt: &mut Statement, ts: &TypeSet) {
+    fn propagate_type_stmt(&mut self, stmt: &mut Statement, ts: &TypeSet) -> Result<(), String> {
         match stmt {
             Statement::VarDecl(name, decl_ty, ex) => {
                 if let Some(&var_ts) = self.locals.get(*name) {
-                    self.propagate_type_expr(ex, dbg!(&var_ts));
-                    *decl_ty = var_ts;
+                    self.propagate_type_expr(ex, &var_ts)?;
+                    *decl_ty = dbg!(var_ts);
                 }
             }
-            Statement::Expr(ex) => self.propagate_type_expr(ex, ts),
+            Statement::VarAssign(name, ex) => {
+                let Some(&var_ts) = self.locals.get(*name) else {
+                    return Err(format!("Assigned-to variable not declared: {name}"));
+                };
+                self.propagate_type_expr(ex, dbg!(&var_ts))?;
+            }
+            Statement::Expr(ex) => self.propagate_type_expr(ex, ts)?,
             Statement::Brace(stmts) => {
                 if let Some(stmt) = stmts.last_mut() {
-                    self.propagate_type_stmt(stmt, dbg!(ts));
+                    self.propagate_type_stmt(stmt, dbg!(ts))?;
                 }
                 for stmt in stmts.iter_mut().rev().skip(1) {
-                    self.propagate_type_stmt(stmt, &TypeSet::default());
+                    self.propagate_type_stmt(stmt, &TypeSet::default())?;
                 }
             }
             Statement::FnDecl(fn_decl) => {
                 for stmt in fn_decl.stmts.iter_mut().rev() {
-                    self.propagate_type_stmt(stmt, &TypeSet::default());
+                    self.propagate_type_stmt(stmt, &TypeSet::default())?;
                 }
+            }
+            Statement::For(for_stmt) => {
+                for stmt in for_stmt.stmts.iter_mut().rev() {
+                    self.propagate_type_stmt(stmt, &TypeSet::default())?;
+                }
+                let Some(&idx_ty) = self.locals.get(for_stmt.name) else {
+                    return Err(format!("Could not find variable {}", for_stmt.name));
+                };
+                dbg!(idx_ty);
+                self.propagate_type_expr(&mut for_stmt.start, &idx_ty)?;
+                self.propagate_type_expr(&mut for_stmt.end, &idx_ty)?;
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn forward_type_stmt(&mut self, stmt: &Statement) -> Result<TypeSet, String> {
         match stmt {
-            Statement::Expr(ex) => self.infer_type_expr(dbg!(ex)),
+            Statement::Expr(ex) => self.forward_type_expr(ex),
+            Statement::VarDecl(name, decl_ty, ex) => {
+                if self.locals.get(*name).is_some() {
+                    return Err(format!("Redeclaration of a variable {name}"));
+                }
+                let ex_ty = self.forward_type_expr(ex)?;
+                let ty;
+                if ex_ty != TypeSet::default() {
+                    ty = *decl_ty | ex_ty;
+                } else {
+                    ty = *decl_ty;
+                }
+                self.locals.insert(name.to_string(), ty);
+                Ok(TypeSet::default())
+            }
+            Statement::VarAssign(name, ex) => {
+                let Some(&decl_ty) = self.locals.get(*name) else {
+                    return Err(format!("Assigned-to variable not declared: {name}"));
+                };
+                let ex_ty = self.forward_type_expr(ex)?;
+                let ty = decl_ty & ex_ty;
+                println!("Inserting var {name}: {ty}");
+                self.locals.insert(name.to_string(), ty);
+                Ok(TypeSet::default())
+            }
             Statement::Brace(stmts) => {
                 let mut last_ty = TypeSet::default();
                 for stmt in stmts {
                     last_ty = self.forward_type_stmt(stmt)?;
                 }
                 Ok(last_ty)
+            }
+            Statement::For(for_stmt) => {
+                let start_ty = self.forward_type_expr(&for_stmt.start)?;
+                let end_ty = self.forward_type_expr(&for_stmt.end)?;
+                let index_ty = dbg!(start_ty | end_ty);
+                self.locals.insert(for_stmt.name.to_string(), index_ty);
+                for stmt in &for_stmt.stmts {
+                    self.forward_type_stmt(stmt)?;
+                }
+                Ok(TypeSet::default())
             }
             _ => Ok(TypeSet::default()),
         }
@@ -164,12 +235,12 @@ impl<'a> TypeInferer<'a> {
     pub fn infer_type_stmt(&mut self, stmt: &mut Statement) -> Result<(), String> {
         match stmt {
             Statement::VarDecl(name, ty, ex) => {
-                let ex_ty = dbg!(self.infer_type_expr(ex)?);
+                let ex_ty = dbg!(self.forward_type_expr(ex)?);
                 let inferred_ty = dbg!(ex_ty & TypeSet::from(*ty));
                 if let Some(determined_ty) = inferred_ty.determine() {
                     // .ok_or_else(|| "Type could not be determined".to_string())?;
                     let determined_ts = TypeSet::from(determined_ty);
-                    self.propagate_type_expr(ex, &determined_ts);
+                    self.propagate_type_expr(ex, &determined_ts)?;
                 }
                 self.locals.insert(name.to_string(), inferred_ty);
                 Ok(())
@@ -181,18 +252,19 @@ impl<'a> TypeInferer<'a> {
                     .iter()
                     .map(|param| (param.name.clone(), param.ty))
                     .collect();
+                inferer.dump_locals();
                 let mut last_ty = TypeSet::default();
                 for stmt in &mut fn_decl.stmts {
                     last_ty = inferer.forward_type_stmt(stmt)?;
                     println!("stmt {stmt:?} ty {last_ty}");
                 }
-                dbg!(last_ty);
+                println!("FnDecl last_ty: {}", last_ty);
                 if let Some(determined_ty) = (last_ty & fn_decl.ret_ty.into()).determine() {
                     let determined_ts = TypeSet::from(determined_ty);
                     dbg!(determined_ty);
                     fn_decl.ret_ty = determined_ts;
                     for stmt in fn_decl.stmts.iter_mut().rev() {
-                        inferer.propagate_type_stmt(stmt, &determined_ts);
+                        inferer.propagate_type_stmt(stmt, &determined_ts)?;
                     }
                 } else {
                     println!(
@@ -203,6 +275,13 @@ impl<'a> TypeInferer<'a> {
                 Ok(())
             }
             _ => Ok(()),
+        }
+    }
+
+    fn dump_locals(&self) {
+        println!("Dump of local types:");
+        for (name, ty) in &self.locals {
+            println!("  {name}: {ty}");
         }
     }
 }
