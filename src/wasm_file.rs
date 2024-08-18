@@ -2,7 +2,7 @@
 use crate::{
     compiler::{disasm_func, encode_leb128, Compiler},
     infer::{get_type_infer_fns, TypeInferFn, TypeInferer},
-    model::{FuncDef, FuncImport, FuncType},
+    model::{FuncDef, FuncImport, FuncType, TypeSet},
     parser::{parse, FnDecl, Statement},
 };
 use std::{collections::HashMap, error::Error, io::Write};
@@ -80,7 +80,7 @@ fn codegen(
     imports: &[FuncImport],
     mut disasm_f: Option<&mut dyn Write>,
 ) -> CompileResult<Vec<FuncDef>> {
-    let mut stmts = parse(&source).unwrap();
+    let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
 
     let mut type_infer_funcs = HashMap::new();
     for import_fn in imports {
@@ -99,7 +99,7 @@ fn codegen(
 
     for stmt in &mut stmts {
         println!("type inferring");
-        let mut inferer = TypeInferer::new(&type_infer_funcs);
+        let mut inferer = TypeInferer::new(TypeSet::default(), &type_infer_funcs);
         inferer
             .infer_type_stmt(stmt)
             .map_err(|e| CompileError::Compile(e))?;
@@ -159,19 +159,20 @@ fn codegen(
     }
 
     for (i, func_stmt) in func_stmts.iter().enumerate() {
+        let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
+            CompileError::Compile("Could not determine return type by type inference".to_string())
+        })?;
         let mut compiler = Compiler::new(
             func_stmt
                 .params
                 .iter()
                 .map(|param| param.clone())
                 .collect::<Vec<_>>(),
+            ret_ty,
             types,
             &imports,
             &mut funcs,
         );
-        let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
-            CompileError::Compile("Could not determine return type by type inference".to_string())
-        })?;
         if let Err(e) = compiler.compile(&func_stmt.stmts, ret_ty) {
             return Err(CompileError::Compile(format!(
                 "Error in compiling function {}: {e}",

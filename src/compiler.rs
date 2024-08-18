@@ -143,17 +143,22 @@ struct TypeMap {
     f64: OpCode,
 }
 
+/// A environment for compiling a function. Note that a program is made of multiple functions,
+/// so you need multiple instances of this object.
 pub struct Compiler<'a> {
     code: Vec<u8>,
     locals: Vec<VarDecl>,
+    ret_ty: Type,
     types: &'a mut Vec<FuncType>,
     imports: &'a [FuncImport],
+    /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
 }
 
 impl<'a> Compiler<'a> {
     pub fn new(
         args: Vec<VarDecl>,
+        ret_ty: Type,
         types: &'a mut Vec<FuncType>,
         imports: &'a [FuncImport],
         funcs: &'a mut Vec<FuncDef>,
@@ -161,6 +166,7 @@ impl<'a> Compiler<'a> {
         Self {
             code: vec![],
             locals: args,
+            ret_ty,
             types,
             imports,
             funcs,
@@ -195,7 +201,11 @@ impl<'a> Compiler<'a> {
                         self.code.push(OpCode::I64Const as u8);
                         Type::I64
                     }
-                    _ => return Err(format!("Literal int type could not be determined: {ts}")),
+                    _ => {
+                        return Err(format!(
+                            "Literal int({num}) type could not be determined: {ts}"
+                        ))
+                    }
                 };
                 encode_sleb128(&mut self.code, *num).unwrap();
                 Ok(ret)
@@ -212,7 +222,11 @@ impl<'a> Compiler<'a> {
                         self.code.write_all(&num.to_le_bytes()).unwrap();
                         Type::F64
                     }
-                    _ => return Err(format!("Literal float type could not be determined: {ts}")),
+                    _ => {
+                        return Err(format!(
+                            "Literal float({num}) type could not be determined: {ts}"
+                        ))
+                    }
                 };
                 Ok(ret)
             }
@@ -255,6 +269,11 @@ impl<'a> Compiler<'a> {
                 encode_leb128(&mut self.code, idx as i32).unwrap();
                 let fn_ty = &self.types[fn_ty];
                 Ok(fn_ty.results.get(0).copied().unwrap_or(Type::Void))
+            }
+            Expression::Cast(ex, ty) => {
+                let ex_ty = self.emit_expr(ex)?;
+                self.coerce_type(*ty, ex_ty)?;
+                Ok(*ty)
             }
             Expression::Neg(ex) => {
                 match self.emit_expr(ex)? {
@@ -537,7 +556,7 @@ impl<'a> Compiler<'a> {
             Statement::Return(ex) => {
                 if let Some(ex) = ex {
                     let ex_ty = self.emit_expr(ex)?;
-                    self.coerce_type(ty, ex_ty)?;
+                    self.coerce_type(self.ret_ty, ex_ty)?;
                 }
                 self.code.push(OpCode::Return as u8);
                 Ok(Type::Void)
@@ -547,11 +566,13 @@ impl<'a> Compiler<'a> {
 
     fn emit_stmts(&mut self, stmts: &[Statement], ty: Type) -> Result<Type, String> {
         let mut last_ty = Type::Void;
-        for stmt in &stmts[..stmts.len() - 1] {
-            if last_ty != Type::Void {
-                self.code.push(OpCode::Drop as u8);
+        if 1 <= stmts.len() {
+            for stmt in &stmts[..stmts.len() - 1] {
+                if last_ty != Type::Void {
+                    self.code.push(OpCode::Drop as u8);
+                }
+                last_ty = self.emit_stmt(stmt, Type::Void)?;
             }
-            last_ty = self.emit_stmt(stmt, Type::Void)?;
         }
         if let Some(last_stmt) = stmts.last() {
             if last_ty != Type::Void {

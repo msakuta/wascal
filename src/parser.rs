@@ -6,6 +6,7 @@ pub enum Expression<'src> {
     LiteralFloat(f64, TypeSet),
     Variable(&'src str),
     FnInvoke(&'src str, Vec<Expression<'src>>),
+    Cast(Box<Expression<'src>>, Type),
     Neg(Box<Expression<'src>>),
     Add(Box<Expression<'src>>, Box<Expression<'src>>),
     Sub(Box<Expression<'src>>, Box<Expression<'src>>),
@@ -184,6 +185,17 @@ fn test_fn_call() {
     );
 }
 
+fn postfix_as<'a>(expr: Expression<'a>, i: &'a str) -> IResult<&'a str, Expression<'a>> {
+    if let Ok((r, _)) = space1(i).and_then(|r| recognize("as")(r)) {
+        println!("after \"as\": {r}");
+        let (r, ty) = identifier(space1(r)?)?;
+        println!("after \"as\" type {ty}: {r}");
+        return Ok((r, Expression::Cast(Box::new(expr), Type::try_from(ty)?)));
+    }
+
+    Ok((i, expr))
+}
+
 fn factor(i: &str) -> Result<(&str, Expression), String> {
     let r = space(i);
 
@@ -199,7 +211,7 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     if let Ok((r, _)) = recognize("(")(r) {
         let (r, ex) = expression(r)?;
         let (r, _) = recognize(")")(r)?;
-        return Ok((r, ex));
+        return postfix_as(ex, r);
     }
 
     let Ok((r, name)) = identifier(r) else {
@@ -207,10 +219,10 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     };
 
     if let Ok((r, ex)) = fn_call(name, r) {
-        return Ok((r, ex));
+        return postfix_as(ex, r);
     }
 
-    return Ok((r, Expression::Variable(name)));
+    postfix_as(Expression::Variable(name), r)
 }
 
 fn mul(i: &str) -> Result<(&str, Expression), String> {

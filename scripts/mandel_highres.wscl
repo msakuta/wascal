@@ -27,12 +27,12 @@ let mandelconverge(creal: f64, cimag: f64) -> i32 = {
 let mandel(xmin: f64, ymin: f64, xstep: f64, ystep: f64, xsteps: f64, ysteps: f64) -> i32 = {
     let xmax: f64 = xmin + xstep * xsteps;
     let ymax: f64 = ymin + ystep * ysteps;
-    let ixsteps: i32 = xsteps;
-    let iysteps: i32 = ysteps;
+    let ixsteps: i32 = xsteps as i32;
+    let iysteps: i32 = ysteps as i32;
     for iy in 0 to iysteps {
-        let y: f64 = iy * (ymax - ymin) * ystep + ymin;
+        let y: f64 = iy as f64 * (ymax - ymin) * ystep + ymin;
         for ix in 0 to ixsteps {
-            let x: f64 = ix * (xmax - xmin) * xstep + xmin;
+            let x: f64 = ix as f64 * (xmax - xmin) * xstep + xmin;
             printdensity(mandelconverge(x,y));
         }
         putc(10);

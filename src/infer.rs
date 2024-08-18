@@ -38,13 +38,15 @@ pub fn get_type_infer_fns(
 }
 
 pub struct TypeInferer<'a> {
+    ret_ty: TypeSet,
     funcs: &'a HashMap<String, TypeInferFn>,
     locals: HashMap<String, TypeSet>,
 }
 
 impl<'a> TypeInferer<'a> {
-    pub fn new(funcs: &'a HashMap<String, TypeInferFn>) -> Self {
+    pub fn new(ret_ty: TypeSet, funcs: &'a HashMap<String, TypeInferFn>) -> Self {
         Self {
+            ret_ty,
             funcs,
             locals: HashMap::new(),
         }
@@ -62,6 +64,7 @@ impl<'a> TypeInferer<'a> {
             Expression::FnInvoke(name, _) => {
                 Ok(self.funcs.get(*name).map_or(TypeSet::ALL, |f| f.ret_ty))
             }
+            Expression::Cast(_ex, ty) => Ok((*ty).into()),
             Expression::Neg(ex) => self.forward_type_expr(ex),
             Expression::Add(lhs, rhs)
             | Expression::Sub(lhs, rhs)
@@ -91,11 +94,15 @@ impl<'a> TypeInferer<'a> {
 
     fn propagate_type_expr(&mut self, ex: &mut Expression, ts: &TypeSet) -> Result<(), String> {
         match ex {
-            Expression::LiteralInt(_, target_ts) => *target_ts = dbg!(*ts),
+            Expression::LiteralInt(_, target_ts) => *target_ts = *ts,
             Expression::LiteralFloat(_, target_ts) => *target_ts = *ts,
-            Expression::Variable(var) => {
-                if let Some(var) = self.locals.get_mut(*var) {
-                    *var = dbg!(*ts);
+            Expression::Variable(name) => {
+                if let Some(var) = self.locals.get_mut(*name) {
+                    println!("propagate variable {name}: {var} -> {ts}");
+                    if (*var & *ts).is_none() {
+                        return Err(format!("Type inference failed to find intersection of type of variable {name}: {var} & {ts}"));
+                    }
+                    *var = *var & *ts;
                 }
             }
             Expression::FnInvoke(name, args) => {
@@ -107,6 +114,12 @@ impl<'a> TypeInferer<'a> {
                     self.propagate_type_expr(arg, &(*ts).into())?;
                 }
             }
+            Expression::Cast(_ex, _ty) => {
+                // Cast will not propagate type constraints
+            }
+            Expression::Neg(ex) => {
+                self.propagate_type_expr(ex, ts)?;
+            }
             Expression::Add(lhs, rhs)
             | Expression::Sub(lhs, rhs)
             | Expression::Mul(lhs, rhs)
@@ -115,13 +128,12 @@ impl<'a> TypeInferer<'a> {
                 self.propagate_type_expr(rhs, ts)?;
             }
             Expression::Lt(lhs, rhs) | Expression::Gt(lhs, rhs) => {
-                println!("propagate_type_expr comp");
-                match (
-                    self.forward_type_expr(lhs)?.determine(),
-                    self.forward_type_expr(rhs)?.determine(),
-                ) {
-                    (Some(lhs), None) => self.propagate_type_expr(dbg!(rhs), &lhs.into())?,
-                    (None, Some(rhs)) => self.propagate_type_expr(dbg!(lhs), &rhs.into())?,
+                let lhs_ty = self.forward_type_expr(lhs)?.determine();
+                let rhs_ty = self.forward_type_expr(rhs)?.determine();
+                println!("propagate_type_expr comp({lhs_ty:?}, {rhs_ty:?})");
+                match (lhs_ty, rhs_ty) {
+                    (Some(lhs_ts), None) => self.propagate_type_expr(rhs, &lhs_ts.into())?,
+                    (None, Some(rhs_ts)) => self.propagate_type_expr(lhs, &rhs_ts.into())?,
                     // (Some(lhs), Some(rhs)) => {}
                     _ => {}
                 }
@@ -135,7 +147,6 @@ impl<'a> TypeInferer<'a> {
                     self.propagate_type_stmt(f_stmt, ts)?;
                 }
             }
-            _ => {}
         }
         Ok(())
     }
@@ -144,20 +155,21 @@ impl<'a> TypeInferer<'a> {
         match stmt {
             Statement::VarDecl(name, decl_ty, ex) => {
                 if let Some(&var_ts) = self.locals.get(*name) {
+                    println!("propagate vardecl {}: {} -> {}", name, *decl_ty, var_ts);
                     self.propagate_type_expr(ex, &var_ts)?;
-                    *decl_ty = dbg!(var_ts);
+                    *decl_ty = var_ts;
                 }
             }
             Statement::VarAssign(name, ex) => {
                 let Some(&var_ts) = self.locals.get(*name) else {
                     return Err(format!("Assigned-to variable not declared: {name}"));
                 };
-                self.propagate_type_expr(ex, dbg!(&var_ts))?;
+                self.propagate_type_expr(ex, &var_ts)?;
             }
             Statement::Expr(ex) => self.propagate_type_expr(ex, ts)?,
             Statement::Brace(stmts) => {
                 if let Some(stmt) = stmts.last_mut() {
-                    self.propagate_type_stmt(stmt, dbg!(ts))?;
+                    self.propagate_type_stmt(stmt, ts)?;
                 }
                 for stmt in stmts.iter_mut().rev().skip(1) {
                     self.propagate_type_stmt(stmt, &TypeSet::default())?;
@@ -175,11 +187,16 @@ impl<'a> TypeInferer<'a> {
                 let Some(&idx_ty) = self.locals.get(for_stmt.name) else {
                     return Err(format!("Could not find variable {}", for_stmt.name));
                 };
-                dbg!(idx_ty);
+                println!("propagate For {}: {}", for_stmt.name, idx_ty);
                 self.propagate_type_expr(&mut for_stmt.start, &idx_ty)?;
                 self.propagate_type_expr(&mut for_stmt.end, &idx_ty)?;
             }
-            _ => {}
+            Statement::Return(ex) => {
+                if let Some(ex) = ex {
+                    let ret_ty = self.ret_ty;
+                    self.propagate_type_expr(ex, &ret_ty)?;
+                }
+            }
         }
         Ok(())
     }
@@ -193,11 +210,12 @@ impl<'a> TypeInferer<'a> {
                 }
                 let ex_ty = self.forward_type_expr(ex)?;
                 let ty;
-                if ex_ty != TypeSet::default() {
-                    ty = *decl_ty | ex_ty;
-                } else {
+                if decl_ty != &TypeSet::default() {
                     ty = *decl_ty;
+                } else {
+                    ty = ex_ty;
                 }
+                println!("forward vardecl {name}: {ty}");
                 self.locals.insert(name.to_string(), ty);
                 Ok(TypeSet::default())
             }
@@ -207,7 +225,7 @@ impl<'a> TypeInferer<'a> {
                 };
                 let ex_ty = self.forward_type_expr(ex)?;
                 let ty = decl_ty & ex_ty;
-                println!("Inserting var {name}: {ty}");
+                println!("forward varassign {name}: {ty}");
                 self.locals.insert(name.to_string(), ty);
                 Ok(TypeSet::default())
             }
@@ -221,13 +239,17 @@ impl<'a> TypeInferer<'a> {
             Statement::For(for_stmt) => {
                 let start_ty = self.forward_type_expr(&for_stmt.start)?;
                 let end_ty = self.forward_type_expr(&for_stmt.end)?;
-                let index_ty = dbg!(start_ty | end_ty);
+                let index_ty = start_ty & end_ty;
+                println!("forward for {}: {}", for_stmt.name, index_ty);
                 self.locals.insert(for_stmt.name.to_string(), index_ty);
                 for stmt in &for_stmt.stmts {
                     self.forward_type_stmt(stmt)?;
                 }
                 Ok(TypeSet::default())
             }
+            Statement::Return(ex) => ex
+                .as_ref()
+                .map_or(Ok(TypeSet::default()), |ex| self.forward_type_expr(ex)),
             _ => Ok(TypeSet::default()),
         }
     }
@@ -235,18 +257,19 @@ impl<'a> TypeInferer<'a> {
     pub fn infer_type_stmt(&mut self, stmt: &mut Statement) -> Result<(), String> {
         match stmt {
             Statement::VarDecl(name, ty, ex) => {
-                let ex_ty = dbg!(self.forward_type_expr(ex)?);
-                let inferred_ty = dbg!(ex_ty & TypeSet::from(*ty));
+                let ex_ty = self.forward_type_expr(ex)?;
+                let inferred_ty = ex_ty & TypeSet::from(*ty);
                 if let Some(determined_ty) = inferred_ty.determine() {
                     // .ok_or_else(|| "Type could not be determined".to_string())?;
                     let determined_ts = TypeSet::from(determined_ty);
                     self.propagate_type_expr(ex, &determined_ts)?;
                 }
+                println!("infer {name}: {inferred_ty}");
                 self.locals.insert(name.to_string(), inferred_ty);
                 Ok(())
             }
             Statement::FnDecl(fn_decl) => {
-                let mut inferer = TypeInferer::new(self.funcs);
+                let mut inferer = TypeInferer::new(fn_decl.ret_ty, self.funcs);
                 inferer.locals = fn_decl
                     .params
                     .iter()
@@ -259,9 +282,9 @@ impl<'a> TypeInferer<'a> {
                     println!("stmt {stmt:?} ty {last_ty}");
                 }
                 println!("FnDecl last_ty: {}", last_ty);
+                inferer.dump_locals();
                 if let Some(determined_ty) = (last_ty & fn_decl.ret_ty.into()).determine() {
                     let determined_ts = TypeSet::from(determined_ty);
-                    dbg!(determined_ty);
                     fn_decl.ret_ty = determined_ts;
                     for stmt in fn_decl.stmts.iter_mut().rev() {
                         inferer.propagate_type_stmt(stmt, &determined_ts)?;
