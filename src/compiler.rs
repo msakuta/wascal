@@ -143,6 +143,13 @@ struct TypeMap {
     f64: OpCode,
 }
 
+const LT_TYPE_MAP: TypeMap = TypeMap {
+    i32: OpCode::I32LtS,
+    i64: OpCode::I64LtS,
+    f32: OpCode::F32Lt,
+    f64: OpCode::F64Lt,
+};
+
 /// A environment for compiling a function. Note that a program is made of multiple functions,
 /// so you need multiple instances of this object.
 pub struct Compiler<'a> {
@@ -352,17 +359,7 @@ impl<'a> Compiler<'a> {
                     f64: OpCode::F64Div,
                 },
             ),
-            Expression::Lt(lhs, rhs) => self.emit_cmp_op(
-                lhs,
-                rhs,
-                "lt",
-                TypeMap {
-                    i32: OpCode::I32LtS,
-                    i64: OpCode::I64LtS,
-                    f32: OpCode::F32Lt,
-                    f64: OpCode::F64Lt,
-                },
-            ),
+            Expression::Lt(lhs, rhs) => self.emit_cmp_op(lhs, rhs, "lt", LT_TYPE_MAP),
             Expression::Gt(lhs, rhs) => self.emit_cmp_op(
                 lhs,
                 rhs,
@@ -504,12 +501,16 @@ impl<'a> Compiler<'a> {
                 stmts,
             }) => {
                 let start_ty = self.emit_expr(start)?;
-                self.coerce_type(Type::I32, start_ty)?; // For now for loop uses i32 for loop variable
-                let idx = self.add_local(*name, Type::I32);
+                let idx = self.add_local(*name, start_ty);
 
                 let end_ty = self.emit_expr(end)?;
-                self.coerce_type(Type::I32, end_ty)?; // Enough fors
-                let end = self.add_local("", Type::I32);
+                let end = self.add_local("", end_ty);
+
+                if start_ty != end_ty {
+                    return Err(format!(
+                        "Start and end types do not match: {start_ty} and {end_ty}"
+                    ));
+                }
 
                 // Start block
                 self.code.push(OpCode::Block as u8);
@@ -522,16 +523,42 @@ impl<'a> Compiler<'a> {
                 // End condition
                 self.local_get(end);
                 self.local_get(idx);
-                self.code.push(OpCode::I32LtS as u8);
+                self.code.push(match start_ty {
+                    Type::I32 => OpCode::I32LtS,
+                    Type::I64 => OpCode::I64LtS,
+                    Type::F32 => OpCode::F32Lt,
+                    Type::F64 => OpCode::F64Lt,
+                    _ => return Err("For loop iteration variable has void type".to_string()),
+                } as u8);
                 self.code.push(OpCode::BrIf as u8);
                 encode_leb128(&mut self.code, 1).unwrap();
                 self.emit_stmts(stmts, Type::Void)?;
 
                 // Incr idx
                 self.local_get(idx);
-                self.code.push(OpCode::I32Const as u8);
-                encode_leb128(&mut self.code, 1).unwrap();
-                self.code.push(OpCode::I32Add as u8);
+                match start_ty {
+                    Type::I32 => {
+                        self.code.push(OpCode::I32Const as u8);
+                        encode_leb128(&mut self.code, 1).unwrap();
+                        self.code.push(OpCode::I32Add as u8);
+                    }
+                    Type::I64 => {
+                        self.code.push(OpCode::I64Const as u8);
+                        encode_leb128(&mut self.code, 1).unwrap();
+                        self.code.push(OpCode::I64Add as u8);
+                    }
+                    Type::F32 => {
+                        self.code.push(OpCode::F32Const as u8);
+                        self.code.extend_from_slice(&1f32.to_le_bytes());
+                        self.code.push(OpCode::F32Add as u8);
+                    }
+                    Type::F64 => {
+                        self.code.push(OpCode::F64Const as u8);
+                        self.code.extend_from_slice(&1f64.to_le_bytes());
+                        self.code.push(OpCode::F64Add as u8);
+                    }
+                    _ => return Err("For loop iteration variable has void type".to_string()),
+                }
                 self.code.push(OpCode::LocalSet as u8);
                 encode_leb128(&mut self.code, idx as i32).unwrap();
 
