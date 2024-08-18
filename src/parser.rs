@@ -88,13 +88,13 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
 
 #[test]
 fn test_uneg() {
-    assert!(matches!(
+    assert_eq!(
         num_literal("-2.5"),
         Ok((
             "",
             Expression::LiteralFloat(-2.5, TypeSet::F32 | TypeSet::F64)
         ))
-    ));
+    );
 }
 
 fn advance_char(input: &str) -> &str {
@@ -199,13 +199,13 @@ fn postfix_as<'a>(expr: Expression<'a>, i: &'a str) -> IResult<&'a str, Expressi
 fn factor(i: &str) -> Result<(&str, Expression), String> {
     let r = space(i);
 
+    if let Ok((r, val)) = num_literal(r) {
+        return Ok((r, val));
+    }
+
     if let Ok((r, _)) = recognize("-")(r) {
         let (r, val) = factor(r)?;
         return Ok((r, Expression::Neg(Box::new(val))));
-    }
-
-    if let Ok((r, val)) = num_literal(r) {
-        return Ok((r, val));
     }
 
     if let Ok((r, _)) = recognize("(")(r) {
