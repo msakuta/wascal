@@ -3,7 +3,7 @@ use crate::{
     compiler::{disasm_func, encode_leb128, Compiler},
     infer::{get_type_infer_fns, set_infer_debug, TypeInferFn, TypeInferer},
     model::{FuncDef, FuncImport, FuncType, TypeSet},
-    parser::{parse, FnDecl, Statement},
+    parser::{format_stmt, parse, FnDecl, Statement},
 };
 use std::{collections::HashMap, error::Error, io::Write};
 
@@ -45,12 +45,20 @@ pub fn compile_wasm(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
     disasm_f: Option<&mut dyn Write>,
+    typeinf_f: Option<&mut dyn Write>,
     debug_type_infer: bool,
 ) -> CompileResult<()> {
     f.write_all(b"\0asm")?;
     f.write_all(&WASM_BINARY_VERSION)?;
 
-    let funcs = codegen(source, types, imports, disasm_f, debug_type_infer)?;
+    let funcs = codegen(
+        source,
+        types,
+        imports,
+        disasm_f,
+        typeinf_f,
+        debug_type_infer,
+    )?;
 
     write_section(f, WASM_TYPE_SECTION, &types_section(&types)?)?;
 
@@ -65,13 +73,25 @@ pub fn compile_wasm(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn disasm_wasm(
     f: &mut impl Write,
     source: &str,
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
 ) -> CompileResult<()> {
-    let _ = codegen(source, types, imports, Some(f), false)?;
+    let _ = codegen(source, types, imports, Some(f), None, false)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn typeinf_wasm(
+    f: &mut impl Write,
+    source: &str,
+    types: &mut Vec<FuncType>,
+    imports: &[FuncImport],
+) -> CompileResult<()> {
+    let _ = codegen(source, types, imports, None, Some(f), false)?;
     Ok(())
 }
 
@@ -80,6 +100,7 @@ fn codegen(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
     mut disasm_f: Option<&mut dyn Write>,
+    typeinf_f: Option<&mut dyn Write>,
     debug_type_infer: bool,
 ) -> CompileResult<Vec<FuncDef>> {
     let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
@@ -112,7 +133,15 @@ fn codegen(
             .map_err(|e| CompileError::Compile(e))?;
     }
 
-    println!("ast: {stmts:?}");
+    if let Some(typeinf_f) = typeinf_f {
+        let mut formatted = vec![];
+        for stmt in &stmts {
+            format_stmt(stmt, 0, &mut formatted)?;
+        }
+        if let Ok(formatted) = String::from_utf8(formatted) {
+            write!(typeinf_f, "{}", formatted)?;
+        }
+    }
 
     let mut funcs = vec![];
 

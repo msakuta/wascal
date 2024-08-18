@@ -1,20 +1,23 @@
 use wasm_bindgen::prelude::*;
 
-use wascal::{compile_wasm, disasm_wasm, parse, FuncImport, FuncType, Type};
-
-use std::io::Write;
+use wascal::{
+    compile_wasm, disasm_wasm, format_stmt, parse, typeinf_wasm, FuncImport, FuncType, Type,
+};
 
 #[wasm_bindgen]
 pub fn parse_ast(source: &str) -> Result<String, JsValue> {
-    let ast = parse(source).map_err(JsValue::from)?;
-    Ok(format!("{ast:#?}"))
+    let (mut types, imports) = default_imports();
+    let mut buf = vec![];
+    typeinf_wasm(&mut buf, source, &mut types, &imports)
+        .map_err(|e| JsValue::from(format!("{e}")))?;
+    String::from_utf8(buf).map_err(|e| JsValue::from(format!("Utf8 error: {e}")))
 }
 
 #[wasm_bindgen]
 pub fn compile(source: &str) -> Result<Vec<u8>, JsValue> {
     let (mut types, imports) = default_imports();
     let mut buf = vec![];
-    compile_wasm(&mut buf, source, &mut types, &imports, None, false)
+    compile_wasm(&mut buf, source, &mut types, &imports, None, None, false)
         .map_err(|e| JsValue::from(format!("{e}")))?;
     Ok(buf)
 }

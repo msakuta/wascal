@@ -45,6 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut types,
         &imports,
         Some(&mut std::io::stdout()),
+        Some(&mut std::io::stdout()),
         debug_type_infer,
     )?;
 

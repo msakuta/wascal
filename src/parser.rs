@@ -548,3 +548,142 @@ pub fn parse(i: &str) -> Result<Vec<Statement>, String> {
 
     Ok(stmts)
 }
+
+pub fn format_expr(
+    ex: &Expression,
+    level: usize,
+    f: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    match ex {
+        Expression::LiteralFloat(num, ts) => write!(f, "{num}: {ts}"),
+        Expression::LiteralInt(num, ts) => write!(f, "{num}: {ts}"),
+        Expression::Variable(name) => write!(f, "{name}"),
+        Expression::FnInvoke(fname, args) => {
+            write!(f, "{fname}(")?;
+            for (i, arg) in args.iter().enumerate() {
+                format_expr(arg, level, f)?;
+                if i != args.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, ")")?;
+            Ok(())
+        }
+        Expression::Cast(ex, ty) => {
+            format_expr(ex, level, f)?;
+            write!(f, "as {ty}")?;
+            Ok(())
+        }
+        Expression::Neg(ex) => {
+            write!(f, "-")?;
+            format_expr(ex, level, f)?;
+            Ok(())
+        }
+        Expression::Add(lhs, rhs) => format_bin_op('+', lhs, rhs, level, f),
+        Expression::Sub(lhs, rhs) => format_bin_op('-', lhs, rhs, level, f),
+        Expression::Mul(lhs, rhs) => format_bin_op('*', lhs, rhs, level, f),
+        Expression::Div(lhs, rhs) => format_bin_op('/', lhs, rhs, level, f),
+        Expression::Lt(lhs, rhs) => format_bin_op('<', lhs, rhs, level, f),
+        Expression::Gt(lhs, rhs) => format_bin_op('>', lhs, rhs, level, f),
+        Expression::Conditional(cond, t_branch, f_branch) => {
+            let indent = "  ".repeat(level);
+            write!(f, "if ")?;
+            format_expr(cond, level, f)?;
+            writeln!(f, " {{")?;
+            for stmt in t_branch {
+                format_stmt(stmt, level + 1, f)?;
+            }
+            write!(f, "{indent}}}")?;
+            if let Some(stmts) = f_branch {
+                writeln!(f, " else {{")?;
+                for stmt in stmts {
+                    format_stmt(stmt, level + 1, f)?;
+                }
+                write!(f, "{indent}}}")?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn format_bin_op(
+    op: char,
+    lhs: &Expression,
+    rhs: &Expression,
+    level: usize,
+    f: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    write!(f, "(")?;
+    format_expr(lhs, level, f)?;
+    write!(f, " {op} ")?;
+    format_expr(rhs, level, f)?;
+    write!(f, ")")?;
+    Ok(())
+}
+
+pub fn format_stmt(
+    stmt: &Statement,
+    level: usize,
+    f: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    let indent = "  ".repeat(level);
+    match stmt {
+        Statement::VarDecl(name, ty, init) => {
+            write!(f, "{indent}var {name}: {ty} = ")?;
+            format_expr(init, level, f)?;
+            writeln!(f, ";")
+        }
+        Statement::VarAssign(name, ex) => {
+            write!(f, "{indent}{name} = ")?;
+            format_expr(ex, level, f)?;
+            writeln!(f, ";")
+        }
+        Statement::Expr(ex) => {
+            write!(f, "{indent}")?;
+            format_expr(ex, level, f)?;
+            writeln!(f, ";")
+        }
+        Statement::Brace(stmts) => {
+            writeln!(f, "{indent}{{")?;
+            for stmt in stmts {
+                format_stmt(stmt, level + 1, f)?;
+            }
+            writeln!(f, "}}")
+        }
+        Statement::FnDecl(func) => {
+            let public = if func.public { "pub " } else { "" };
+            write!(f, "{public}let fn {}(", func.name)?;
+            for (i, param) in func.params.iter().enumerate() {
+                write!(f, "{}: {}", param.name, param.ty)?;
+                if i != func.params.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, ") -> {} =", func.ret_ty)?;
+            for stmt in &func.stmts {
+                format_stmt(stmt, level + 1, f)?;
+            }
+            writeln!(f, "")?;
+            Ok(())
+        }
+        Statement::For(for_stmt) => {
+            write!(f, "{indent}for {} in ", for_stmt.name)?;
+            format_expr(&for_stmt.start, level, f)?;
+            write!(f, " to ")?;
+            format_expr(&for_stmt.end, level, f)?;
+            writeln!(f, " {{")?;
+            for stmt in &for_stmt.stmts {
+                format_stmt(stmt, level + 1, f)?;
+            }
+            writeln!(f, "{indent}}}")?;
+            Ok(())
+        }
+        Statement::Return(ex) => {
+            write!(f, "{indent}return ")?;
+            if let Some(ex) = ex {
+                format_expr(ex, level, f)?;
+            }
+            writeln!(f, ";")
+        }
+    }
+}
