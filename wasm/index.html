@@ -76,6 +76,11 @@
                 <li>f64</li>
             </ul>
 
+            <p>
+            Yes, there are no string types!
+            Since we do not use linear memory yet, we can't handle variable length data, including a string.
+            </p>
+
             <h2>Built-in functions</h2>
 
             <ul>
@@ -195,6 +200,25 @@ for i in 1 to x {
     if 10 &lt; i {
         break
     };
+}
+            </pre>
+
+            <h3>Return statement</h3>
+            Return statement lets you exit the function early.
+
+            <pre>
+let mandelconverge(creal: f64, cimag: f64) -> i32 = {
+    let r: f64 = creal;
+    let i: f64 = cimag;
+    for iter in 0 to 255 {
+        if r*r + i*i > 4. {
+            return iter;
+        };
+        let next_r: f64 = r * r - i * i + creal;
+        i = 2. * r * i + cimag;
+        r = next_r;
+    }
+    iter
 }
             </pre>
 
