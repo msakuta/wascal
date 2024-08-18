@@ -97,8 +97,36 @@ let x: i32 = 42;
             </pre>
 
             <p>
-            If the type is omitted, it is assumed to be <tt>i32</tt>.
+            If the type is omitted, the type is inferred.
+            However, note that the variable has to be constrained by an expression somewhere in the function, otherwise
+            the type inference fails with an ambiguous type.
+            So the function below is ok:
             </p>
+
+            <pre>
+let f() -> i32 = {
+    let x = 42;
+    x
+}
+            </pre>
+
+            <p>
+            but the one below is not, because its type is not bounded by any expression.
+            </p>
+
+            <pre>
+let f() -> i32 = {
+    let x = 42;
+    0
+}
+            </pre>
+
+            <h3>Cast expression</h3>
+            You can cast a type to another with <tt>as</tt> keyword:
+
+            <pre>
+pub let as_i32(x: f64) -> i32 = x as i32;
+            </pre>
 
             <h3>Function definition</h3>
             <p>
@@ -110,7 +138,8 @@ let add(x: i32, y: i32) -> i32 = x + y;
             </pre>
 
             <p>
-            If the types of the parameters or the returned value is omitted, it is assumed to be <tt>i32</tt>.
+            Types of the parameters are required, although this requirement may be lifted in the future.
+            If the return type is omitted, it is inferred from the last expression in the function body.
             </p>
 
             <p>
