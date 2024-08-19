@@ -571,7 +571,7 @@ pub fn format_expr(
         }
         Expression::Cast(ex, ty) => {
             format_expr(ex, level, f)?;
-            write!(f, "as {ty}")?;
+            write!(f, " as {ty}")?;
             Ok(())
         }
         Expression::Neg(ex) => {
