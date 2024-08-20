@@ -15,7 +15,7 @@ My main interest is the performance among other implementations of runtime.
 Here is my simple Mandelbrot set ASCII art rendering time comparison.
 Surprisingly, Wasm is quite fast, even faster than native compiled code via LLVM IR (implemented in [inkwell-ruscal](https://github.com/msakuta/inkwell-ruscal)).
 There are other implementations using AST interpreter and my own bytecode interpreter (implemented in [ruscal](https://github.com/msakuta/ruscal)), but they are very slow.
-I also put Java (OpenJDK), Python and JavaScript (Node.js) as a comparison of popular scripting languages.
+I also put Ruby, Java (OpenJDK), Python and JavaScript (Node.js) as a comparison of popular scripting languages.
 I also put native C and Rust compiled code, but of course they are the fastest.
 
 ![performance](images/mandel-time.png)
