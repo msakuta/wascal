@@ -629,7 +629,7 @@ pub fn format_stmt(
     let indent = "  ".repeat(level);
     match stmt {
         Statement::VarDecl(name, ty, init) => {
-            write!(f, "{indent}var {name}: {ty} = ")?;
+            write!(f, "{indent}let {name}: {ty} = ")?;
             format_expr(init, level, f)?;
             writeln!(f, ";")
         }
@@ -652,7 +652,7 @@ pub fn format_stmt(
         }
         Statement::FnDecl(func) => {
             let public = if func.public { "pub " } else { "" };
-            write!(f, "{public}let fn {}(", func.name)?;
+            write!(f, "{public}let {}(", func.name)?;
             for (i, param) in func.params.iter().enumerate() {
                 write!(f, "{}: {}", param.name, param.ty)?;
                 if i != func.params.len() - 1 {
