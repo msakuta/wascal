@@ -1,11 +1,12 @@
 //! Implementation of type inference using TypeSet
 
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
 use crate::{
     model::TypeSet,
-    parser::{Expression, Statement},
-    Type,
+    parser::{format_stmt, Expression, Statement},
+    wasm_file::{CompileError, CompileResult},
+    FuncImport, FuncType, Type,
 };
 
 macro_rules! dprintln {
@@ -25,17 +26,17 @@ thread_local! {
     static DEBUG: std::cell::Cell<bool> = std::cell::Cell::new(false);
 }
 
-pub fn set_infer_debug(b: bool) {
+pub(crate) fn set_infer_debug(b: bool) {
     DEBUG.set(b);
 }
 
 #[derive(Debug, PartialEq)]
-pub struct TypeInferFn {
+struct TypeInferFn {
     pub(crate) params: Vec<Type>,
     pub(crate) ret_ty: TypeSet,
 }
 
-pub fn get_type_infer_fns(
+fn get_type_infer_fns(
     stmt: &Statement,
     funcs: &mut HashMap<String, TypeInferFn>,
 ) -> Result<(), String> {
@@ -58,7 +59,7 @@ pub fn get_type_infer_fns(
     Ok(())
 }
 
-pub struct TypeInferer<'a> {
+struct TypeInferer<'a> {
     ret_ty: TypeSet,
     funcs: &'a HashMap<String, TypeInferFn>,
     locals: HashMap<String, TypeSet>,
@@ -193,7 +194,7 @@ impl<'a> TypeInferer<'a> {
                     self.propagate_type_stmt(stmt, ts)?;
                 }
                 for stmt in stmts.iter_mut().rev().skip(1) {
-                    self.propagate_type_stmt(stmt, &TypeSet::default())?;
+                    self.propagate_type_stmt(stmt, &Type::Void.into())?;
                 }
             }
             Statement::FnDecl(fn_decl) => {
@@ -238,7 +239,7 @@ impl<'a> TypeInferer<'a> {
                 }
                 dprintln!("forward vardecl {name}: {ty}");
                 self.locals.insert(name.to_string(), ty);
-                Ok(TypeSet::default())
+                Ok(Type::Void.into())
             }
             Statement::VarAssign(name, ex) => {
                 let Some(&decl_ty) = self.locals.get(*name) else {
@@ -248,7 +249,7 @@ impl<'a> TypeInferer<'a> {
                 let ty = decl_ty & ex_ty;
                 dprintln!("forward varassign {name}: {ty}");
                 self.locals.insert(name.to_string(), ty);
-                Ok(TypeSet::default())
+                Ok(Type::Void.into())
             }
             Statement::Brace(stmts) => {
                 let mut last_ty = TypeSet::default();
@@ -266,7 +267,7 @@ impl<'a> TypeInferer<'a> {
                 for stmt in &for_stmt.stmts {
                     self.forward_type_stmt(stmt)?;
                 }
-                Ok(TypeSet::default())
+                Ok(Type::Void.into())
             }
             Statement::Return(ex) => ex
                 .as_ref()
@@ -290,6 +291,7 @@ impl<'a> TypeInferer<'a> {
                 Ok(())
             }
             Statement::FnDecl(fn_decl) => {
+                dprintln!("Start type inference on fn {}", fn_decl.name);
                 let mut inferer = TypeInferer::new(fn_decl.ret_ty, self.funcs);
                 inferer.locals = fn_decl
                     .params
@@ -300,21 +302,36 @@ impl<'a> TypeInferer<'a> {
                 let mut last_ty = TypeSet::default();
                 for stmt in &mut fn_decl.stmts {
                     last_ty = inferer.forward_type_stmt(stmt)?;
-                    dprintln!("stmt {stmt:?} ty {last_ty}");
+                    let mut bytes = vec![];
+                    if let Some(s) = format_stmt(stmt, 0, &mut bytes)
+                        .ok()
+                        .and_then(|_| String::from_utf8(bytes).ok())
+                    {
+                        dprintln!("stmt ty {last_ty}: {}", s);
+                    } else {
+                        dprintln!("stmt ty {last_ty}");
+                    }
                 }
                 dprintln!("FnDecl last_ty: {}", last_ty);
                 inferer.dump_locals();
                 if let Some(determined_ty) = (last_ty & fn_decl.ret_ty.into()).determine() {
                     let determined_ts = TypeSet::from(determined_ty);
                     fn_decl.ret_ty = determined_ts;
+                    dprintln!(
+                        "Function {}'s return type is inferred to be {}",
+                        fn_decl.name,
+                        determined_ty
+                    );
                     for stmt in fn_decl.stmts.iter_mut().rev() {
                         inferer.propagate_type_stmt(stmt, &determined_ts)?;
                     }
                 } else {
                     dprintln!(
-                        "Function return type could not be determined: {}",
+                        "Function {}'s return type could not be determined: {}",
+                        fn_decl.name,
                         last_ty & fn_decl.ret_ty.into()
                     );
+                    fn_decl.ret_ty = Type::Void.into();
                 }
                 Ok(())
             }
@@ -331,4 +348,52 @@ impl<'a> TypeInferer<'a> {
             println!("  {name}: {ty}");
         }
     }
+}
+
+/// Run type inference engine. Since it modifies the type declaration in the AST,
+/// `stmts` needs to be a mutable reference, but it won't add or remove statements, so it doesn't
+/// have to be a `&mut Vec<Statement>`.
+pub fn run_type_infer(
+    stmts: &mut [Statement],
+    types: &mut Vec<FuncType>,
+    imports: &[FuncImport],
+    typeinf_f: Option<&mut dyn Write>,
+) -> CompileResult<()> {
+    let mut type_infer_funcs = HashMap::new();
+    for import_fn in imports {
+        let func_ty = &types[import_fn.ty];
+        type_infer_funcs.insert(
+            import_fn.name.clone(),
+            TypeInferFn {
+                params: func_ty.params.clone(),
+                ret_ty: func_ty
+                    .results
+                    .get(0)
+                    .map_or(TypeSet::default(), |v| (*v).into()),
+            },
+        );
+    }
+    for stmt in stmts.iter_mut() {
+        get_type_infer_fns(stmt, &mut type_infer_funcs).map_err(|e| CompileError::Compile(e))?;
+    }
+
+    for (i, stmt) in stmts.iter_mut().enumerate() {
+        dprintln!("type inferring toplevel statement {i}");
+        let mut inferer = TypeInferer::new(TypeSet::default(), &type_infer_funcs);
+        inferer
+            .infer_type_stmt(stmt)
+            .map_err(|e| CompileError::Compile(e))?;
+    }
+
+    if let Some(typeinf_f) = typeinf_f {
+        let mut formatted = vec![];
+        for stmt in stmts {
+            format_stmt(stmt, 0, &mut formatted)?;
+        }
+        if let Ok(formatted) = String::from_utf8(formatted) {
+            write!(typeinf_f, "{}", formatted)?;
+        }
+    }
+
+    Ok(())
 }

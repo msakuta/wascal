@@ -44,6 +44,7 @@ impl TryFrom<&str> for Type {
             "i64" => Type::I64,
             "f32" => Type::F32,
             "f64" => Type::F64,
+            "void" => Type::Void,
             _ => return Err(format!("Unknown type {}", value)),
         })
     }
@@ -67,6 +68,7 @@ pub struct TypeSet {
     pub i64: bool,
     pub f32: bool,
     pub f64: bool,
+    pub void: bool,
 }
 
 impl TypeSet {
@@ -75,30 +77,35 @@ impl TypeSet {
         i64: false,
         f32: false,
         f64: false,
+        void: false,
     };
     pub const I64: Self = Self {
         i32: false,
         i64: true,
         f32: false,
         f64: false,
+        void: false,
     };
     pub const F32: Self = Self {
         i32: false,
         i64: false,
         f32: true,
         f64: false,
+        void: false,
     };
     pub const F64: Self = Self {
         i32: false,
         i64: false,
         f32: false,
         f64: true,
+        void: false,
     };
     pub const ALL: Self = Self {
         i32: true,
         i64: true,
         f32: true,
         f64: true,
+        void: true,
     };
 
     pub fn is_none(&self) -> bool {
@@ -112,25 +119,36 @@ impl TypeSet {
                 i64: false,
                 f32: false,
                 f64: false,
+                void: false,
             } => Some(Type::I32),
             TypeSet {
                 i32: false,
                 i64: true,
                 f32: false,
                 f64: false,
+                void: false,
             } => Some(Type::I64),
             TypeSet {
                 i32: false,
                 i64: false,
                 f32: true,
                 f64: false,
+                void: false,
             } => Some(Type::F32),
             TypeSet {
                 i32: false,
                 i64: false,
                 f32: false,
                 f64: true,
+                void: false,
             } => Some(Type::F64),
+            TypeSet {
+                i32: false,
+                i64: false,
+                f32: false,
+                f64: false,
+                void: true,
+            } => Some(Type::Void),
             _ => None,
         }
     }
@@ -144,6 +162,7 @@ impl std::ops::BitOr for TypeSet {
             i64: self.i64 | rhs.i64,
             f32: self.f32 | rhs.f32,
             f64: self.f64 | rhs.f64,
+            void: self.void | rhs.void,
         }
     }
 }
@@ -156,6 +175,7 @@ impl std::ops::BitAnd for TypeSet {
             i64: self.i64 & rhs.i64,
             f32: self.f32 & rhs.f32,
             f64: self.f64 & rhs.f64,
+            void: self.void & rhs.void,
         }
     }
 }
@@ -168,7 +188,7 @@ impl From<Type> for TypeSet {
             Type::I64 => ret.i64 = true,
             Type::F32 => ret.f32 = true,
             Type::F64 => ret.f64 = true,
-            _ => {}
+            Type::Void => ret.void = true,
         }
         ret
     }
@@ -202,8 +222,15 @@ impl std::fmt::Display for TypeSet {
             write!(f, "f64")?;
             written = true;
         }
-        if !written {
+        if self.void {
+            if written {
+                write!(f, "|")?;
+            }
             write!(f, "void")?;
+            written = true;
+        }
+        if !written {
+            write!(f, "(none)")?;
         }
         Ok(())
     }

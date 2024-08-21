@@ -644,7 +644,6 @@ pub(crate) fn encode_leb128(f: &mut impl Write, mut value: i32) -> std::io::Resu
         let mut byte = (value & 0x7f) as u8;
         value >>= 7;
         if value != 0 {
-            // set high-order bit of byte;
             byte |= 0x80;
         }
         f.write_all(&[byte])?;
@@ -839,7 +838,7 @@ pub fn disasm_func(
         if func.public { "pub " } else { "" },
         func.name,
         params,
-        func_ty.results[0]
+        func_ty.results.first().unwrap_or(&Type::Void)
     )?;
     let locals = &func.locals[func_ty.params.len()..];
     let locals = locals

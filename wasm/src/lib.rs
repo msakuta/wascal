@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 
 use wascal::{
-    compile_wasm, disasm_wasm, format_stmt, parse, typeinf_wasm, FuncImport, FuncType, Type,
+    compile_wasm, disasm_wasm, typeinf_wasm, FuncImport, FuncType, Type,
 };
 
 #[wasm_bindgen]

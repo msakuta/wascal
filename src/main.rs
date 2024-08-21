@@ -12,9 +12,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut file_name = "scripts/hello.wscl".to_string();
     let mut debug_type_infer = false;
+    let mut enable_disasm = false;
     for arg in std::env::args().skip(1) {
         match &arg as &str {
             "-d" => debug_type_infer = true,
+            "-D" => enable_disasm = true,
             _ => file_name = arg,
         }
     }
@@ -39,12 +41,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
+    let mut disasm_f = if enable_disasm {
+        Some(std::io::stdout())
+    } else {
+        None
+    };
     compile_wasm(
         &mut f,
         &source,
         &mut types,
         &imports,
-        Some(&mut std::io::stdout()),
+        disasm_f.as_mut().map(|p| p as &mut dyn std::io::Write),
         Some(&mut std::io::stdout()),
         debug_type_infer,
     )?;

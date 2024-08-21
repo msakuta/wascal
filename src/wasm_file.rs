@@ -1,11 +1,12 @@
 //! Code to write wasm file format sections.
 use crate::{
     compiler::{disasm_func, encode_leb128, Compiler},
-    infer::{get_type_infer_fns, set_infer_debug, TypeInferFn, TypeInferer},
-    model::{FuncDef, FuncImport, FuncType, TypeSet},
-    parser::{format_stmt, parse, FnDecl, Statement},
+    infer::{run_type_infer, set_infer_debug},
+    model::{FuncDef, FuncImport, FuncType},
+    parser::{parse, FnDecl, Statement},
+    Type,
 };
-use std::{collections::HashMap, error::Error, io::Write};
+use std::{error::Error, io::Write};
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
@@ -107,41 +108,7 @@ fn codegen(
 
     set_infer_debug(debug_type_infer);
 
-    let mut type_infer_funcs = HashMap::new();
-    for import_fn in imports {
-        let func_ty = &types[import_fn.ty];
-        type_infer_funcs.insert(
-            import_fn.name.clone(),
-            TypeInferFn {
-                params: func_ty.params.clone(),
-                ret_ty: func_ty
-                    .results
-                    .get(0)
-                    .map_or(TypeSet::default(), |v| (*v).into()),
-            },
-        );
-    }
-    for stmt in &stmts {
-        get_type_infer_fns(stmt, &mut type_infer_funcs).map_err(|e| CompileError::Compile(e))?;
-    }
-
-    for stmt in &mut stmts {
-        println!("type inferring");
-        let mut inferer = TypeInferer::new(TypeSet::default(), &type_infer_funcs);
-        inferer
-            .infer_type_stmt(stmt)
-            .map_err(|e| CompileError::Compile(e))?;
-    }
-
-    if let Some(typeinf_f) = typeinf_f {
-        let mut formatted = vec![];
-        for stmt in &stmts {
-            format_stmt(stmt, 0, &mut formatted)?;
-        }
-        if let Ok(formatted) = String::from_utf8(formatted) {
-            write!(typeinf_f, "{}", formatted)?;
-        }
-    }
+    run_type_infer(&mut stmts, types, imports, typeinf_f)?;
 
     let mut funcs = vec![];
 
@@ -165,6 +132,12 @@ fn codegen(
 
     for func_stmt in &func_stmts {
         let ty = types.len();
+        let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
+            CompileError::Compile(format!(
+                "Function return type could not be determined: {}",
+                func_stmt.ret_ty
+            ))
+        })?;
         types.push(FuncType {
             params: func_stmt
                 .params
@@ -176,12 +149,11 @@ fn codegen(
                         "Function argument type could not be determined".to_string(),
                     )
                 })?,
-            results: vec![func_stmt.ret_ty.determine().ok_or_else(|| {
-                CompileError::Compile(format!(
-                    "Function return type could not be determined: {}",
-                    func_stmt.ret_ty
-                ))
-            })?],
+            results: if ret_ty != Type::Void {
+                vec![ret_ty]
+            } else {
+                vec![]
+            },
         });
         let func = FuncDef {
             name: func_stmt.name.to_string(),

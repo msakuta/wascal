@@ -24,7 +24,7 @@ let mandelconverge(creal: f64, cimag: f64) -> i32 = {
     iter
 }
 
-let mandel(xmin: f64, ymin: f64, xstep: f64, ystep: f64, xsteps: f64, ysteps: f64) -> i32 = {
+let mandel(xmin: f64, ymin: f64, xstep: f64, ystep: f64, xsteps: f64, ysteps: f64) -> void = {
     let xmax: f64 = xmin + xstep * xsteps;
     let ymax: f64 = ymin + ystep * ysteps;
     let ixsteps: i32 = xsteps as i32;
@@ -37,7 +37,6 @@ let mandel(xmin: f64, ymin: f64, xstep: f64, ystep: f64, xsteps: f64, ysteps: f6
             rectangle(ix * 2, iy * 2, 2, 2);
         }
     }
-    0
 }
 
 pub let main() = mandel(-2.0, -2.0, 0.05 / 4., 0.05 / 4., 160., 160.);
