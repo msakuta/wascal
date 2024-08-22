@@ -31,6 +31,19 @@
 
 let obj;
 
+function addStringToWasm(s) {
+    if (!obj) return;
+    const view32 = new Int32Array(obj.instance.exports.memory.buffer);
+    const top = view32[0];
+    const textEncoder = new TextEncoder('utf8');
+    const encodedString = textEncoder.encode(s);
+    const view8 = new Uint8Array(obj.instance.exports.memory.buffer, top + 4, encodedString.length);
+    view8.set(encodedString);
+    const newTop = top + Math.floor(encodedString.length + 3 / 4) * 4;
+    view32[0] = newTop;
+    return [top, encodedString.length];
+}
+
 window.addEventListener("load", () => {
     const consoleElem = document.getElementById("console");
     let outputBuf = "";
@@ -90,17 +103,28 @@ window.addEventListener("load", () => {
     const callFunc = expName => async () => {
         const expFunc = obj.instance.exports[expName];
         console.log("Calling wasm");
-        const argElems = functionElems[expName];
-        let args = [];
-        for (let i = 0; i < expFunc.length; i++) {
-            const x = parseFloat(argElems[i].value);
-            args.push(x);
-        }
-        const output = document.getElementById('output');
-        const start = performance.now();
         outputBuf = "";
+        const start = performance.now();
         try{
-            output.innerHTML = expFunc.apply(this, args);
+            const addedString = addStringToWasm("Hello");
+            const argElems = functionElems[expName];
+            let args = [];
+            for (let i = 0; i < expFunc.length; i++) {
+                if (i < 2) {
+                    args.push(addedString[i]);
+                }
+                else {
+                    const x = parseFloat(argElems[i].value);
+                    args.push(x);
+                }
+            }
+            const output = document.getElementById('output');
+            const res = expFunc.apply(this, args);
+            const view32 = new Int32Array(obj.instance.exports.memory.buffer, res + 4, 2);
+            const strView = new Int8Array(obj.instance.exports.memory.buffer, view32[0] + 4, view32[1]);
+            const textDecoder = new TextDecoder('utf-8');
+            const decoded = textDecoder.decode(strView);
+            output.innerHTML = decoded;
         }
         catch(e){
             outputBuf = e;

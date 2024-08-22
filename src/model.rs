@@ -8,6 +8,7 @@ pub enum Type {
     F64,
     // Pseudo type representing no value
     Void,
+    Str,
 }
 
 impl Type {
@@ -18,6 +19,8 @@ impl Type {
             Self::F32 => 0x7d,
             Self::F64 => 0x7c,
             Self::Void => 0x40,
+            // Str is a compound type, so it does not have a code.
+            Self::Str => 0x0,
         }
     }
 }
@@ -58,6 +61,7 @@ impl std::fmt::Display for Type {
             Self::F32 => write!(f, "f32"),
             Self::F64 => write!(f, "f64"),
             Self::Void => write!(f, "void"),
+            Self::Str => write!(f, "str"),
         }
     }
 }
@@ -69,6 +73,7 @@ pub struct TypeSet {
     pub f32: bool,
     pub f64: bool,
     pub void: bool,
+    pub st: bool,
 }
 
 impl TypeSet {
@@ -78,6 +83,7 @@ impl TypeSet {
         f32: false,
         f64: false,
         void: false,
+        st: false,
     };
     pub const I64: Self = Self {
         i32: false,
@@ -85,6 +91,7 @@ impl TypeSet {
         f32: false,
         f64: false,
         void: false,
+        st: false,
     };
     pub const F32: Self = Self {
         i32: false,
@@ -92,6 +99,7 @@ impl TypeSet {
         f32: true,
         f64: false,
         void: false,
+        st: false,
     };
     pub const F64: Self = Self {
         i32: false,
@@ -99,6 +107,23 @@ impl TypeSet {
         f32: false,
         f64: true,
         void: false,
+        st: false,
+    };
+    pub const VOID: Self = Self {
+        i32: false,
+        i64: false,
+        f32: false,
+        f64: false,
+        void: true,
+        st: false,
+    };
+    pub const STR: Self = Self {
+        i32: false,
+        i64: false,
+        f32: false,
+        f64: false,
+        void: false,
+        st: true,
     };
     pub const ALL: Self = Self {
         i32: true,
@@ -106,6 +131,7 @@ impl TypeSet {
         f32: true,
         f64: true,
         void: true,
+        st: false,
     };
 
     pub fn is_none(&self) -> bool {
@@ -114,41 +140,12 @@ impl TypeSet {
 
     pub fn determine(&self) -> Option<Type> {
         match self {
-            TypeSet {
-                i32: true,
-                i64: false,
-                f32: false,
-                f64: false,
-                void: false,
-            } => Some(Type::I32),
-            TypeSet {
-                i32: false,
-                i64: true,
-                f32: false,
-                f64: false,
-                void: false,
-            } => Some(Type::I64),
-            TypeSet {
-                i32: false,
-                i64: false,
-                f32: true,
-                f64: false,
-                void: false,
-            } => Some(Type::F32),
-            TypeSet {
-                i32: false,
-                i64: false,
-                f32: false,
-                f64: true,
-                void: false,
-            } => Some(Type::F64),
-            TypeSet {
-                i32: false,
-                i64: false,
-                f32: false,
-                f64: false,
-                void: true,
-            } => Some(Type::Void),
+            &Self::I32 => Some(Type::I32),
+            &Self::I64 => Some(Type::I64),
+            &Self::F32 => Some(Type::F32),
+            &Self::F64 => Some(Type::F64),
+            &Self::VOID => Some(Type::Void),
+            &Self::STR => Some(Type::Str),
             _ => None,
         }
     }
@@ -163,6 +160,7 @@ impl std::ops::BitOr for TypeSet {
             f32: self.f32 | rhs.f32,
             f64: self.f64 | rhs.f64,
             void: self.void | rhs.void,
+            st: self.st | rhs.st,
         }
     }
 }
@@ -176,6 +174,7 @@ impl std::ops::BitAnd for TypeSet {
             f32: self.f32 & rhs.f32,
             f64: self.f64 & rhs.f64,
             void: self.void & rhs.void,
+            st: self.st & rhs.st,
         }
     }
 }
@@ -189,6 +188,7 @@ impl From<Type> for TypeSet {
             Type::F32 => ret.f32 = true,
             Type::F64 => ret.f64 = true,
             Type::Void => ret.void = true,
+            Type::Str => ret.st = true,
         }
         ret
     }

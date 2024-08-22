@@ -13,6 +13,7 @@ const WASM_TYPE_SECTION: u8 = 1;
 const WASM_IMPORT_SECTION: u8 = 0x2;
 const WASM_FUNCTION_SECTION: u8 = 3;
 const WASM_CODE_SECTION: u8 = 0x0a;
+const WASM_MEMORY_SECTION: u8 = 0x05;
 const WASM_EXPORT_SECTION: u8 = 0x07;
 
 #[derive(Debug)]
@@ -66,6 +67,8 @@ pub fn compile_wasm(
     write_section(f, WASM_IMPORT_SECTION, &import_section(&imports)?)?;
 
     write_section(f, WASM_FUNCTION_SECTION, &functions_section(&funcs)?)?;
+
+    write_section(f, WASM_MEMORY_SECTION, &memory_section()?)?;
 
     write_section(f, WASM_EXPORT_SECTION, &export_section(&funcs, &imports)?)?;
 
@@ -207,7 +210,7 @@ fn codegen(
 
 fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Result<()> {
     f.write_all(&[section])?;
-    encode_leb128(f, payload.len() as i32)?;
+    encode_leb128(f, payload.len() as u32)?;
     f.write_all(&payload)?;
     Ok(())
 }
@@ -215,15 +218,15 @@ fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Re
 fn types_section(types: &[FuncType]) -> std::io::Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
 
-    encode_leb128(&mut buf, types.len() as i32)?; //size
+    encode_leb128(&mut buf, types.len() as u32)?; //size
 
     for ty in types {
         buf.write_all(&[0x60])?; //fn
-        encode_leb128(&mut buf, ty.params.len() as i32)?;
+        encode_leb128(&mut buf, ty.params.len() as u32)?;
         for param in &ty.params {
             buf.write_all(&[param.code()])?;
         }
-        encode_leb128(&mut buf, ty.results.len() as i32)?;
+        encode_leb128(&mut buf, ty.results.len() as u32)?;
         for res in &ty.results {
             buf.write_all(&[res.code()])?;
         }
@@ -236,7 +239,7 @@ fn import_section(funcs: &[FuncImport]) -> std::io::Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
     let mut writer = &mut buf;
 
-    encode_leb128(writer, funcs.len() as i32)?;
+    encode_leb128(writer, funcs.len() as u32)?;
 
     for fun in funcs.iter() {
         write_string(&mut writer, &fun.module)?;
@@ -268,7 +271,7 @@ fn code_section(funcs: &[FuncDef], types: &[FuncType]) -> std::io::Result<Vec<u8
 
     for fun in funcs {
         let fun_buf = code_single(fun, types)?;
-        encode_leb128(&mut buf, fun_buf.len() as i32)?;
+        encode_leb128(&mut buf, fun_buf.len() as u32)?;
         buf.write_all(&fun_buf)?;
     }
 
@@ -331,25 +334,43 @@ fn code_single(fun: &FuncDef, types: &[FuncType]) -> std::io::Result<Vec<u8>> {
 }
 
 fn export_section(funcs: &[FuncDef], imports: &[FuncImport]) -> std::io::Result<Vec<u8>> {
+    const EXPORT_FUNC: u8 = 0;
+    const EXPORT_MEM: u8 = 2;
     let mut buf: Vec<u8> = vec![];
-    let mut writer = std::io::Cursor::new(&mut buf);
 
     encode_leb128(
-        &mut writer,
-        funcs.iter().filter(|f| f.public).count() as i32,
+        &mut buf,
+        funcs.iter().filter(|f| f.public).count() as u32 + 1,
     )?;
 
+    // mem export
+    write_string(&mut buf, "memory")?;
+    buf.push(EXPORT_MEM as u8);
+    encode_leb128(&mut buf, 0)?; // Index 0
+
     for (i, fun) in funcs.iter().enumerate().filter(|(_, f)| f.public) {
-        write_string(&mut writer, &fun.name)?;
-        encode_leb128(&mut writer, 0)?; //export kind
-        encode_leb128(&mut writer, (i + imports.len()) as i32)?;
+        write_string(&mut buf, &fun.name)?;
+        buf.push(EXPORT_FUNC);
+        encode_leb128(&mut buf, (i + imports.len()) as u32)?;
     }
 
     Ok(buf)
 }
 
+fn memory_section() -> std::io::Result<Vec<u8>> {
+    const NO_LIMIT: u8 = 0u8;
+    const INITIAL_PAGES: u32 = 1;
+
+    let mut buf = vec![];
+    encode_leb128(&mut buf, 1)?;
+    buf.push(NO_LIMIT);
+    encode_leb128(&mut buf, INITIAL_PAGES as u32)?;
+
+    Ok(buf)
+}
+
 fn write_string(f: &mut impl Write, s: &str) -> std::io::Result<()> {
-    encode_leb128(f, s.len() as i32)?;
+    encode_leb128(f, s.len() as u32)?;
     f.write_all(s.as_bytes())?;
     Ok(())
 }

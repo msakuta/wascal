@@ -19,6 +19,10 @@ pub(crate) enum OpCode {
     Drop = 0x1a,
     LocalGet = 0x20,
     LocalSet = 0x21,
+    I32Load = 0x28,
+    I32Load8S = 0x2c,
+    I32Store = 0x36,
+    I32Store8 = 0x3a,
     I32Const = 0x41,
     I64Const = 0x42,
     F32Const = 0x43,
@@ -39,6 +43,7 @@ pub(crate) enum OpCode {
     I32Sub = 0x6b,
     I32Mul = 0x6c,
     I32DivS = 0x6d,
+    I32And = 0x71,
     I64Add = 0x7c,
     I64Sub = 0x7d,
     I64Mul = 0x7e,
@@ -96,6 +101,10 @@ impl_op_from!(
     Block: "block", Loop: "loop", If: "if", Else: "else", End: "end", Br: "br", BrIf: "br_if",
     Return: "return", Call: "call", Drop: "drop",
     LocalGet: "local.get", LocalSet: "local.set",
+    I32Load: "i32.load",
+    I32Load8S: "i32.load8_s",
+    I32Store: "i32.store",
+    I32Store8: "i32.store8",
     I32Const: "i32.const",
     I64Const: "i64.const",
     F32Const: "f32.const",
@@ -116,6 +125,7 @@ impl_op_from!(
     I32Sub: "i32.sub",
     I32Mul: "i32.mul",
     I32DivS: "i32.div_s",
+    I32And: "i32.and",
     I64Add: "i64.add",
     I64Sub: "i64.sub",
     I64Mul: "i64.mul",
@@ -181,10 +191,143 @@ impl<'a> Compiler<'a> {
     }
 
     pub fn compile(&mut self, ast: &[Statement], ty: Type) -> Result<Type, String> {
-        // let mut target_stack = vec![];
-        let last = self.emit_stmts(ast, ty)?;
+        // self.i32const(0);
+        // self.code.push(OpCode::I32Const as u8);
+        // encode_leb128(&mut self.code, 0).unwrap();
+        // self.i32load()?;
+        // self.code.push(OpCode::I32Const as u8);
+        // encode_leb128(&mut self.code, 1).unwrap();
+        // self.code.push(OpCode::I32Add as u8);
+        // self.i32store()?;
+
+        // self.code.push(OpCode::LocalGet as u8);
+        // encode_leb128(&mut self.code, 0).unwrap();
+
+        // get length of the string
+        self.local_get(1);
+
+        // Allocate another chunk of memory with the same length
+        let new_buf = self.bump()?;
+
+        self.i32const(0);
+        let idx = self.add_local("", Type::I32);
+
+        self.emit_for_loop(idx, 1, Type::I32, |this| {
+            this.local_get(idx); // [idx]
+            this.local_get(0); // [idx, ptr]
+
+            this.code.push(OpCode::I32Add as u8); // [idx + ptr]
+
+            this.i32load8_s(4)?; // [mem[idx + ptr]]
+            let data = this.add_local("", Type::I32); // []
+
+            this.local_get(1); // [len]
+            this.local_get(idx); // [len, idx]
+            this.code.push(OpCode::I32Sub as u8); // [len - idx]
+            this.i32const(1); // [len - idx, 1]
+            this.code.push(OpCode::I32Sub as u8); // [len - idx - 1]
+            this.local_get(new_buf); // [len - idx - 1, new_buf]
+            this.code.push(OpCode::I32Add as u8); // [len - idx - 1 + new_buf]
+            this.local_get(data); // [len - idx + new_buf, mem[idx + ptr]]
+
+            this.i32store8(4)?; // []
+
+            Ok(())
+        })?;
+
+        // let last = self.emit_stmts(ast, ty)?;
+
+        // Allocate buffer to return string
+        self.i32const(8);
+        let ret_buf = self.bump()?;
+
+        // Write ptr
+        self.local_get(ret_buf);
+        self.local_get(new_buf);
+        self.i32store(4)?;
+
+        // Write length
+        self.local_get(ret_buf);
+        self.i32const(4);
+        self.code.push(OpCode::I32Add as u8);
+        self.local_get(1);
+        self.i32store(4)?;
+
+        self.local_get(ret_buf);
+
         self.code.push(OpCode::End as u8);
-        Ok(last)
+        Ok(Type::I32)
+    }
+
+    fn i32const(&mut self, val: u32) {
+        self.code.push(OpCode::I32Const as u8);
+        encode_leb128(&mut self.code, val).unwrap();
+    }
+
+    fn i32and(&mut self, val: u32) {
+        self.code.push(OpCode::I32And as u8);
+        encode_sleb128(&mut self.code, val as i32).unwrap();
+        println!("and: {:?}", &self.code[self.code.len() - 6..]);
+    }
+
+    fn i32load(&mut self, offset: u32) -> Result<(), String> {
+        self.code.push(OpCode::I32Load as u8);
+        encode_leb128(&mut self.code, 0).unwrap();
+        encode_leb128(&mut self.code, offset).unwrap();
+        Ok(())
+    }
+
+    fn i32load8_s(&mut self, offset: u32) -> Result<(), String> {
+        self.code.push(OpCode::I32Load8S as u8);
+        encode_leb128(&mut self.code, 0).unwrap();
+        encode_leb128(&mut self.code, offset).unwrap();
+        Ok(())
+    }
+
+    fn i32store(&mut self, offset: u32) -> Result<(), String> {
+        self.code.push(OpCode::I32Store as u8);
+        encode_leb128(&mut self.code, 0).unwrap();
+        encode_leb128(&mut self.code, offset).unwrap();
+        Ok(())
+    }
+
+    fn i32store8(&mut self, offset: u32) -> Result<(), String> {
+        self.code.push(OpCode::I32Store8 as u8);
+        encode_leb128(&mut self.code, 0).unwrap();
+        encode_leb128(&mut self.code, offset).unwrap();
+        Ok(())
+    }
+
+    /// Assumes there is a value length in i32 on top of the stack, returning local index storing the address of the new buffer
+    fn bump(&mut self) -> Result<usize, String> {
+        const ALLOC_ALIGN: u32 = 4;
+        let stashed = self.add_local("", Type::I32); // []
+
+        self.i32const(0); // [0]
+        self.i32load(0)?; // [mem[0]]
+        let start_addr = self.add_local("", Type::I32); // []
+
+        self.i32const(0); // [0]
+                          // self.local_get(stashed); // [0, stashed]
+
+        // Round the length up to 4 bytes for the next allocation
+        self.local_get(stashed);
+        self.i32const(ALLOC_ALIGN - 1);
+        self.code.push(OpCode::I32Add as u8);
+        self.i32const(ALLOC_ALIGN);
+        self.code.push(OpCode::I32DivS as u8);
+        self.i32const(ALLOC_ALIGN);
+        self.code.push(OpCode::I32Mul as u8);
+        // self.i32and(!(0x3));
+
+        self.i32const(0); // [0, stashed, 0]
+        self.i32load(0)?; // [0, stashed, mem[0]]
+
+        self.code.push(OpCode::I32Add as u8); // [0, stashed + mem[0]]
+
+        self.i32store(0)?; // []
+
+        Ok(start_addr)
     }
 
     pub fn get_code(&self) -> &[u8] {
@@ -273,7 +416,7 @@ impl<'a> Compiler<'a> {
                     }
                 }
                 self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, idx as i32).unwrap();
+                encode_leb128(&mut self.code, idx as u32).unwrap();
                 let fn_ty = &self.types[fn_ty];
                 Ok(fn_ty.results.get(0).copied().unwrap_or(Type::Void))
             }
@@ -291,7 +434,7 @@ impl<'a> Compiler<'a> {
                         self.code.push(OpCode::I32Const as u8);
                         encode_leb128(&mut self.code, 0).unwrap();
                         self.code.push(OpCode::LocalGet as u8);
-                        encode_leb128(&mut self.code, v as i32).unwrap();
+                        encode_leb128(&mut self.code, v as u32).unwrap();
                         self.code.push(OpCode::I32Sub as u8);
                         Ok(Type::I32)
                     }
@@ -300,7 +443,7 @@ impl<'a> Compiler<'a> {
                         self.code.push(OpCode::I32Const as u8);
                         encode_leb128(&mut self.code, 0).unwrap();
                         self.code.push(OpCode::LocalGet as u8);
-                        encode_leb128(&mut self.code, v as i32).unwrap();
+                        encode_leb128(&mut self.code, v as u32).unwrap();
                         self.code.push(OpCode::I32Sub as u8);
                         Ok(Type::I64)
                     }
@@ -313,6 +456,7 @@ impl<'a> Compiler<'a> {
                         Ok(Type::F64)
                     }
                     Type::Void => Ok(Type::Void),
+                    Type::Str => return Err("Unary minus is not defined for str".to_string()),
                 }
             }
             Expression::Add(lhs, rhs) => self.emit_bin_op(
@@ -400,7 +544,7 @@ impl<'a> Compiler<'a> {
 
     fn local_get(&mut self, idx: usize) {
         self.code.push(OpCode::LocalGet as u8);
-        encode_leb128(&mut self.code, idx as i32).unwrap();
+        encode_leb128(&mut self.code, idx as u32).unwrap();
     }
 
     fn emit_bin_op(
@@ -487,7 +631,7 @@ impl<'a> Compiler<'a> {
                     .find(|(_, local)| &local.name == name)
                     .ok_or_else(|| format!("Variable {name} not found"))?;
                 self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, idx as i32).unwrap();
+                encode_leb128(&mut self.code, idx as u32).unwrap();
                 Ok(Type::Void)
             }
             Statement::FnDecl(_) => {
@@ -512,64 +656,9 @@ impl<'a> Compiler<'a> {
                     ));
                 }
 
-                // Start block
-                self.code.push(OpCode::Block as u8);
-                self.code.push(Type::Void.code());
-
-                // Start loop
-                self.code.push(OpCode::Loop as u8);
-                self.code.push(Type::Void.code());
-
-                // End condition
-                self.local_get(end);
-                self.local_get(idx);
-                self.code.push(match start_ty {
-                    Type::I32 => OpCode::I32LtS,
-                    Type::I64 => OpCode::I64LtS,
-                    Type::F32 => OpCode::F32Lt,
-                    Type::F64 => OpCode::F64Lt,
-                    _ => return Err("For loop iteration variable has void type".to_string()),
-                } as u8);
-                self.code.push(OpCode::BrIf as u8);
-                encode_leb128(&mut self.code, 1).unwrap();
-                self.emit_stmts(stmts, Type::Void)?;
-
-                // Incr idx
-                self.local_get(idx);
-                match start_ty {
-                    Type::I32 => {
-                        self.code.push(OpCode::I32Const as u8);
-                        encode_leb128(&mut self.code, 1).unwrap();
-                        self.code.push(OpCode::I32Add as u8);
-                    }
-                    Type::I64 => {
-                        self.code.push(OpCode::I64Const as u8);
-                        encode_leb128(&mut self.code, 1).unwrap();
-                        self.code.push(OpCode::I64Add as u8);
-                    }
-                    Type::F32 => {
-                        self.code.push(OpCode::F32Const as u8);
-                        self.code.extend_from_slice(&1f32.to_le_bytes());
-                        self.code.push(OpCode::F32Add as u8);
-                    }
-                    Type::F64 => {
-                        self.code.push(OpCode::F64Const as u8);
-                        self.code.extend_from_slice(&1f64.to_le_bytes());
-                        self.code.push(OpCode::F64Add as u8);
-                    }
-                    _ => return Err("For loop iteration variable has void type".to_string()),
-                }
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, idx as i32).unwrap();
-
-                self.code.push(OpCode::Br as u8);
-                encode_leb128(&mut self.code, 0 as i32).unwrap();
-
-                // end loop
-                self.code.push(OpCode::End as u8);
-
-                // end block
-                self.code.push(OpCode::End as u8);
+                self.emit_for_loop(idx, end, start_ty, |this| {
+                    this.emit_stmts(stmts, Type::Void).map(|_| ())
+                })?;
 
                 Ok(Type::Void)
             }
@@ -615,7 +704,7 @@ impl<'a> Compiler<'a> {
     fn add_local(&mut self, name: impl Into<String>, ty: Type) -> usize {
         let ret = self.locals.len();
         self.code.push(OpCode::LocalSet as u8);
-        encode_leb128(&mut self.code, ret as i32).unwrap();
+        encode_leb128(&mut self.code, ret as u32).unwrap();
         self.locals.push(VarDecl {
             name: name.into(),
             ty: ty.into(),
@@ -637,9 +726,80 @@ impl<'a> Compiler<'a> {
         }
         Ok(())
     }
+
+    /// Emit a for loop running while incrementing `idx` until `end`.
+    fn emit_for_loop(
+        &mut self,
+        idx: usize,
+        end: usize,
+        iter_ty: Type,
+        gen_code: impl FnOnce(&mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        // Start block
+        self.code.push(OpCode::Block as u8);
+        self.code.push(Type::Void.code());
+
+        // Start loop
+        self.code.push(OpCode::Loop as u8);
+        self.code.push(Type::Void.code());
+
+        // End condition
+        self.local_get(end);
+        self.local_get(idx);
+        self.code.push(match iter_ty {
+            Type::I32 => OpCode::I32LtS,
+            Type::I64 => OpCode::I64LtS,
+            Type::F32 => OpCode::F32Lt,
+            Type::F64 => OpCode::F64Lt,
+            _ => return Err("For loop iteration variable has void type".to_string()),
+        } as u8);
+        self.code.push(OpCode::BrIf as u8);
+        encode_leb128(&mut self.code, 1).unwrap();
+
+        gen_code(self)?;
+
+        // Incr idx
+        self.local_get(idx);
+        match iter_ty {
+            Type::I32 => {
+                self.code.push(OpCode::I32Const as u8);
+                encode_leb128(&mut self.code, 1).unwrap();
+                self.code.push(OpCode::I32Add as u8);
+            }
+            Type::I64 => {
+                self.code.push(OpCode::I64Const as u8);
+                encode_leb128(&mut self.code, 1).unwrap();
+                self.code.push(OpCode::I64Add as u8);
+            }
+            Type::F32 => {
+                self.code.push(OpCode::F32Const as u8);
+                self.code.extend_from_slice(&1f32.to_le_bytes());
+                self.code.push(OpCode::F32Add as u8);
+            }
+            Type::F64 => {
+                self.code.push(OpCode::F64Const as u8);
+                self.code.extend_from_slice(&1f64.to_le_bytes());
+                self.code.push(OpCode::F64Add as u8);
+            }
+            _ => return Err("For loop iteration variable has void type".to_string()),
+        }
+        self.code.push(OpCode::LocalSet as u8);
+        encode_leb128(&mut self.code, idx as u32).unwrap();
+
+        self.code.push(OpCode::Br as u8);
+        encode_leb128(&mut self.code, 0).unwrap();
+
+        // end loop
+        self.code.push(OpCode::End as u8);
+
+        // end block
+        self.code.push(OpCode::End as u8);
+        Ok(())
+    }
 }
 
-pub(crate) fn encode_leb128(f: &mut impl Write, mut value: i32) -> std::io::Result<()> {
+pub(crate) fn encode_leb128(f: &mut impl Write, value: u32) -> std::io::Result<()> {
+    let mut value = value as u32;
     loop {
         let mut byte = (value & 0x7f) as u8;
         value >>= 7;
@@ -779,6 +939,11 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}local.set {arg}")?;
             }
+            I32Store | I32Store8 | I32Load | I32Load8S => {
+                let mem = decode_leb128(&mut cur)?;
+                let align = decode_leb128(&mut cur)?;
+                writeln!(f, "{indent}{} {mem} {align}", code.to_name())?;
+            }
             I32Const => {
                 let arg = decode_sleb128(&mut cur)?;
                 writeln!(f, "{indent}i32.const {arg}")?;
@@ -799,10 +964,10 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let arg = f64::from_le_bytes(buf);
                 writeln!(f, "{indent}f64.const {arg}")?;
             }
-            I32LtS | I32LtU | I32GtS | I32GtU | I32Add | I32Sub | I32Mul | I32DivS | I64LtS
-            | I64LtU | I64GtS | I64GtU | I64Add | I64Sub | I64Mul | I64DivS | F32Neg | F32Lt
-            | F32Gt | F32Add | F32Sub | F32Mul | F32Div | F64Neg | F64Lt | F64Gt | F64Add
-            | F64Sub | F64Mul | F64Div | I32WrapI64 | I32TruncF32S | I32TruncF64S
+            I32LtS | I32LtU | I32GtS | I32GtU | I32Add | I32Sub | I32Mul | I32DivS | I32And
+            | I64LtS | I64LtU | I64GtS | I64GtU | I64Add | I64Sub | I64Mul | I64DivS | F32Neg
+            | F32Lt | F32Gt | F32Add | F32Sub | F32Mul | F32Div | F64Neg | F64Lt | F64Gt
+            | F64Add | F64Sub | F64Mul | F64Div | I32WrapI64 | I32TruncF32S | I32TruncF64S
             | I64ExtendI32S | I64TruncF32S | I64TruncF64S | F32ConvertI32S | F32ConvertI64S
             | F32DemoteF64 | F64ConvertI32S | F64ConvertI64S | F64PromoteF32 => {
                 writeln!(f, "{indent}{}", code.to_name())?;
