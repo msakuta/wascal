@@ -206,8 +206,20 @@ impl<'a> Compiler<'a> {
         // get length of the string
         self.local_get(1);
 
+        let malloc_id = self
+            .funcs
+            .iter()
+            .enumerate()
+            .find(|(_, func)| func.name == "malloc")
+            .ok_or_else(|| "malloc not found".to_string())?
+            .0
+            + self.imports.len();
+
         // Allocate another chunk of memory with the same length
-        let new_buf = self.bump()?;
+        // let new_buf = self.bump()?;
+        self.code.push(OpCode::Call as u8);
+        encode_leb128(&mut self.code, malloc_id as u32).unwrap();
+        let new_buf = self.add_local("", Type::I32);
 
         self.i32const(0);
         let idx = self.add_local("", Type::I32);
@@ -239,6 +251,8 @@ impl<'a> Compiler<'a> {
 
         // Allocate buffer to return string
         self.i32const(8);
+        self.code.push(OpCode::Call as u8);
+        encode_leb128(&mut self.code, malloc_id as u32).unwrap();
         let ret_buf = self.bump()?;
 
         // Write ptr
@@ -328,6 +342,53 @@ impl<'a> Compiler<'a> {
         self.i32store(0)?; // []
 
         Ok(start_addr)
+    }
+
+    /// Define a function malloc, which allocates a block of heap memory
+    /// with the size given by the argument.
+    pub fn malloc(
+        types: &mut Vec<FuncType>,
+        imports: &[FuncImport],
+        funcs: &mut Vec<FuncDef>,
+    ) -> Result<(usize, usize), String> {
+        let malloc_ty = types.len();
+        types.push(Compiler::malloc_type());
+
+        let mut compiler = Compiler::new(
+            vec![VarDecl {
+                name: "len".to_string(),
+                ty: Type::I32.into(),
+            }],
+            Type::I32,
+            types,
+            imports,
+            funcs,
+        );
+        compiler.local_get(0);
+        let ret = compiler.bump()?;
+        compiler.local_get(ret);
+        compiler.code.push(OpCode::End as u8);
+
+        let func = FuncDef {
+            name: "malloc".to_string(),
+            ty: malloc_ty,
+            locals: compiler.locals,
+            code: compiler.code,
+            public: true,
+        };
+
+        let malloc_fn = funcs.len();
+
+        funcs.push(func);
+
+        Ok((malloc_ty, malloc_fn))
+    }
+
+    pub fn malloc_type() -> FuncType {
+        FuncType {
+            params: vec![Type::I32],
+            results: vec![Type::I32],
+        }
     }
 
     pub fn get_code(&self) -> &[u8] {

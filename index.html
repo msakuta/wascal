@@ -110,7 +110,7 @@ window.addEventListener("load", () => {
             const argElems = functionElems[expName];
             let args = [];
             for (let i = 0; i < expFunc.length; i++) {
-                if (i < 2) {
+                if (expName !== "malloc" && i < 2) {
                     args.push(addedString[i]);
                 }
                 else {

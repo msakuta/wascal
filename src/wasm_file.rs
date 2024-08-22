@@ -107,13 +107,22 @@ fn codegen(
     typeinf_f: Option<&mut dyn Write>,
     debug_type_infer: bool,
 ) -> CompileResult<Vec<FuncDef>> {
+    let mut funcs = vec![];
+
+    let (malloc_ty, malloc_fn) =
+        Compiler::malloc(types, imports, &mut funcs).map_err(|e| CompileError::Compile(e))?;
+
+    if let Some(ref mut disasm_f) = disasm_f {
+        let func_ty = &types[malloc_ty];
+
+        disasm_func(&funcs[malloc_fn], &func_ty, disasm_f)?;
+    }
+
     let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
 
     set_infer_debug(debug_type_infer);
 
     run_type_infer(&mut stmts, types, imports, typeinf_f)?;
-
-    let mut funcs = vec![];
 
     fn find_funcs<'a>(stmts: &'a [Statement<'a>], funcs: &mut Vec<&FnDecl<'a>>) {
         for stmt in stmts.iter() {
@@ -194,7 +203,7 @@ fn codegen(
         let code = compiler.get_code().to_vec();
         let locals = compiler.get_locals().to_vec();
 
-        let func = &mut funcs[i];
+        let func = &mut funcs[i + 1];
         func.code = code;
         func.locals = locals;
 
