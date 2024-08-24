@@ -120,10 +120,9 @@ window.addEventListener("load", () => {
             }
             const output = document.getElementById('output');
             const res = expFunc.apply(this, args);
-            const view32 = new Int32Array(obj.instance.exports.memory.buffer, res + 4, 2);
-            const strView = new Int8Array(obj.instance.exports.memory.buffer, view32[0] + 4, view32[1]);
+            const view32 = new Int32Array(obj.instance.exports.memory.buffer, res + 4);
             const textDecoder = new TextDecoder('utf-8');
-            const decoded = textDecoder.decode(strView);
+            const decoded = textDecoder.decode(view32);
             output.innerHTML = decoded;
         }
         catch(e){

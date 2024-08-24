@@ -1,3 +1,6 @@
+mod malloc;
+mod set;
+
 use std::io::{Read, Write};
 
 use crate::{
@@ -261,7 +264,7 @@ impl<'a> Compiler<'a> {
         self.i32const(8);
         self.code.push(OpCode::Call as u8);
         encode_leb128(&mut self.code, malloc_id as u32).unwrap();
-        let ret_buf = self.bump()?;
+        let ret_buf = self.codegen_malloc()?;
 
         // Write ptr
         self.local_get(ret_buf);
@@ -316,85 +319,6 @@ impl<'a> Compiler<'a> {
         encode_leb128(&mut self.code, 0).unwrap();
         encode_leb128(&mut self.code, offset).unwrap();
         Ok(())
-    }
-
-    /// Assumes there is a value length in i32 on top of the stack, returning local index storing the address of the new buffer
-    fn bump(&mut self) -> Result<usize, String> {
-        const ALLOC_ALIGN: u32 = 4;
-        let stashed = self.add_local("", Type::I32); // []
-
-        self.i32const(0); // [0]
-        self.i32load(0)?; // [mem[0]]
-        let start_addr = self.add_local("", Type::I32); // []
-
-        self.i32const(0); // [0]
-                          // self.local_get(stashed); // [0, stashed]
-
-        // Round the length up to 4 bytes for the next allocation
-        self.local_get(stashed);
-        self.i32const(ALLOC_ALIGN - 1);
-        self.code.push(OpCode::I32Add as u8);
-        self.i32const(ALLOC_ALIGN);
-        self.code.push(OpCode::I32DivS as u8);
-        self.i32const(ALLOC_ALIGN);
-        self.code.push(OpCode::I32Mul as u8);
-        // self.i32and(!(0x3));
-
-        self.i32const(0); // [0, stashed, 0]
-        self.i32load(0)?; // [0, stashed, mem[0]]
-
-        self.code.push(OpCode::I32Add as u8); // [0, stashed + mem[0]]
-
-        self.i32store(0)?; // []
-
-        Ok(start_addr)
-    }
-
-    /// Define a function malloc, which allocates a block of heap memory
-    /// with the size given by the argument.
-    pub fn malloc(
-        types: &mut Vec<FuncType>,
-        imports: &[FuncImport],
-        funcs: &mut Vec<FuncDef>,
-    ) -> Result<(usize, usize), String> {
-        let malloc_ty = types.len();
-        types.push(Compiler::malloc_type());
-
-        let mut compiler = Compiler::new(
-            vec![VarDecl {
-                name: "len".to_string(),
-                ty: Type::I32.into(),
-            }],
-            Type::I32,
-            types,
-            imports,
-            funcs,
-        );
-        compiler.local_get(0);
-        let ret = compiler.bump()?;
-        compiler.local_get(ret);
-        compiler.code.push(OpCode::End as u8);
-
-        let func = FuncDef {
-            name: "malloc".to_string(),
-            ty: malloc_ty,
-            locals: compiler.locals,
-            code: compiler.code,
-            public: true,
-        };
-
-        let malloc_fn = funcs.len();
-
-        funcs.push(func);
-
-        Ok((malloc_ty, malloc_fn))
-    }
-
-    pub fn malloc_type() -> FuncType {
-        FuncType {
-            params: vec![Type::I32],
-            results: vec![Type::I32],
-        }
     }
 
     pub fn get_code(&self) -> &[u8] {
@@ -766,8 +690,10 @@ impl<'a> Compiler<'a> {
             }
         }
         if let Some(last_stmt) = stmts.last() {
-            for _ in 0..last_ty.word_count() {
-                self.code.push(OpCode::Drop as u8);
+            if ty.word_count() < last_ty.word_count() {
+                for _ in 0..last_ty.word_count() - ty.word_count() {
+                    self.code.push(OpCode::Drop as u8);
+                }
             }
             last_ty = self.emit_stmt(last_stmt, ty)?;
         }

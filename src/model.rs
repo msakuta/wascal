@@ -19,8 +19,8 @@ impl Type {
             Self::F32 => 0x7d,
             Self::F64 => 0x7c,
             Self::Void => 0x40,
-            // Str is a compound type, so it does not have a code.
-            Self::Str => 0x0,
+            // Str is a compound type, but it is returned as an i32 pointing the buffer.
+            Self::Str => 0x7f,
         }
     }
 

@@ -1,0 +1,9 @@
+pub let main(s: str) -> i32 = {
+    let out = malloc(23);
+    set(out, 72);
+    set(out + 1, 101);
+    set(out + 2, 108);
+    set(out + 3, 108);
+    set(out + 4, 111);
+    out
+}

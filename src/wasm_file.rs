@@ -118,6 +118,17 @@ fn codegen(
         disasm_func(&funcs[malloc_fn], &func_ty, disasm_f)?;
     }
 
+    let (set_ty, set_fn) =
+        Compiler::compile_set(types, imports, &mut funcs).map_err(|e| CompileError::Compile(e))?;
+
+    if let Some(ref mut disasm_f) = disasm_f {
+        let func_ty = &types[set_ty];
+
+        disasm_func(&funcs[set_fn], &func_ty, disasm_f)?;
+    }
+
+    let std_fns = funcs.len();
+
     println!("functions before type infer:");
     for func in &funcs {
         println!("  {}", func.name);
@@ -208,7 +219,7 @@ fn codegen(
         let code = compiler.get_code().to_vec();
         let locals = compiler.get_locals().to_vec();
 
-        let func = &mut funcs[i + 1];
+        let func = &mut funcs[i + std_fns];
         func.code = code;
         func.locals = locals;
 
