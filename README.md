@@ -20,6 +20,11 @@ I also put native C and Rust compiled code, but of course they are the fastest.
 
 ![performance](images/mandel-time.png)
 
+A special note is needed for `Go run` and `Go build`.
+Both are execution time for Golang, but `Go run` is the time of the whole `go run` command, which includes compilation.
+`Go build` is a time of executing the executable produced by `go build` command, excluding the compilation time.
+Since other scrpting languages like Ruby or Python include compile time of the source text, I think it's more fair to compare with the compilation time, but we are also interested in execution time with ahead-of-time compiled executable, so I put them both.
+
 Below is the actual output.
 You can see the script in [mandel_highres.wscl](scripts/mandel_highres.wscl).
 
