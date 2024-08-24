@@ -4,6 +4,7 @@ mod set;
 use std::io::{Read, Write};
 
 use crate::{
+    const_table::{self, ConstTable},
     model::{FuncDef, FuncImport, FuncType, Type},
     parser::{Expression, For, Statement, VarDecl},
     wasm_file::CompileResult,
@@ -174,6 +175,7 @@ pub struct Compiler<'a> {
     ret_ty: Type,
     types: &'a mut Vec<FuncType>,
     imports: &'a [FuncImport],
+    const_table: &'a mut ConstTable,
     /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
 }
@@ -184,6 +186,7 @@ impl<'a> Compiler<'a> {
         ret_ty: Type,
         types: &'a mut Vec<FuncType>,
         imports: &'a [FuncImport],
+        const_table: &'a mut ConstTable,
         funcs: &'a mut Vec<FuncDef>,
     ) -> Self {
         Self {
@@ -192,6 +195,7 @@ impl<'a> Compiler<'a> {
             ret_ty,
             types,
             imports,
+            const_table,
             funcs,
         }
     }
@@ -370,6 +374,12 @@ impl<'a> Compiler<'a> {
                     }
                 };
                 Ok(ret)
+            }
+            Expression::StrLiteral(s) => {
+                let (ptr, len) = self.const_table.add_const(s, s.as_bytes());
+                self.i32const(ptr as u32);
+                self.i32const(len as u32);
+                Ok(Type::Str)
             }
             Expression::Variable(name) => {
                 let (ret, local) = self
@@ -697,6 +707,12 @@ impl<'a> Compiler<'a> {
             }
             last_ty = self.emit_stmt(last_stmt, ty)?;
         }
+
+        // If a string is returned, return only the pointer to the head
+        if last_ty == Type::Str {
+            self.code.push(OpCode::Drop as u8);
+        }
+
         Ok(last_ty)
     }
 
@@ -718,7 +734,9 @@ impl<'a> Compiler<'a> {
             (Type::I32, Type::I32)
             | (Type::I64, Type::I64)
             | (Type::F32, Type::F32)
-            | (Type::F64, Type::F64) => {}
+            | (Type::F64, Type::F64)
+            | (Type::Void, Type::Void)
+            | (Type::Str, Type::Str) => {}
             (Type::I32, Type::I64) => self.code.push(OpCode::I32WrapI64 as u8),
             (Type::I64, Type::I32) => self.code.push(OpCode::I64ExtendI32S as u8),
             (Type::I32, Type::F64) => self.code.push(OpCode::I32TruncF64S as u8),

@@ -1,4 +1,4 @@
-use crate::{model::FuncDef, parser::VarDecl, FuncImport, FuncType, Type};
+use crate::{const_table::ConstTable, model::FuncDef, parser::VarDecl, FuncImport, FuncType, Type};
 
 use super::{Compiler, OpCode};
 
@@ -8,6 +8,7 @@ impl<'a> Compiler<'a> {
     pub fn malloc(
         types: &mut Vec<FuncType>,
         imports: &[FuncImport],
+        const_table: &mut ConstTable,
         funcs: &mut Vec<FuncDef>,
     ) -> Result<(usize, usize), String> {
         let malloc_ty = types.len();
@@ -21,6 +22,7 @@ impl<'a> Compiler<'a> {
             Type::I32,
             types,
             imports,
+            const_table,
             funcs,
         );
         compiler.local_get(0);

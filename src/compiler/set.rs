@@ -1,4 +1,9 @@
-use crate::{model::FuncDef, parser::VarDecl, FuncImport, FuncType, Type};
+use crate::{
+    const_table::{self, ConstTable},
+    model::FuncDef,
+    parser::VarDecl,
+    FuncImport, FuncType, Type,
+};
 
 use super::{Compiler, OpCode};
 
@@ -7,6 +12,7 @@ impl<'a> Compiler<'a> {
     pub fn compile_set(
         types: &mut Vec<FuncType>,
         imports: &[FuncImport],
+        const_table: &mut ConstTable,
         funcs: &mut Vec<FuncDef>,
     ) -> Result<(usize, usize), String> {
         let set_ty = types.len();
@@ -26,6 +32,7 @@ impl<'a> Compiler<'a> {
             Type::Void,
             types,
             imports,
+            const_table,
             funcs,
         );
         compiler.codegen_set()?;

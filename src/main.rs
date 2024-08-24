@@ -1,4 +1,5 @@
 mod compiler;
+mod const_table;
 mod infer;
 mod model;
 mod parser;

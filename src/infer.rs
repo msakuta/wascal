@@ -82,6 +82,7 @@ impl<'a> TypeInferer<'a> {
         match ex {
             Expression::LiteralInt(_, ts) => Ok(*ts),
             Expression::LiteralFloat(_, ts) => Ok(*ts),
+            Expression::StrLiteral(_) => Ok(Type::Str.into()),
             Expression::Variable(name) => Ok(self
                 .locals
                 .get(*name)
@@ -124,6 +125,7 @@ impl<'a> TypeInferer<'a> {
         match ex {
             Expression::LiteralInt(_, target_ts) => *target_ts = *ts,
             Expression::LiteralFloat(_, target_ts) => *target_ts = *ts,
+            Expression::StrLiteral(_) => {}
             Expression::Variable(name) => {
                 if let Some(var) = self.locals.get_mut(*name) {
                     dprintln!("propagate variable {name}: {var} -> {ts}");

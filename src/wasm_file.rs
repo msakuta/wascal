@@ -1,6 +1,7 @@
 //! Code to write wasm file format sections.
 use crate::{
     compiler::{disasm_func, encode_leb128, Compiler, OpCode},
+    const_table::ConstTable,
     infer::{run_type_infer, set_infer_debug},
     model::{FuncDef, FuncImport, FuncType},
     parser::{parse, FnDecl, Statement},
@@ -54,7 +55,7 @@ pub fn compile_wasm(
     f.write_all(b"\0asm")?;
     f.write_all(&WASM_BINARY_VERSION)?;
 
-    let funcs = codegen(
+    let (funcs, const_table) = codegen(
         source,
         types,
         imports,
@@ -75,7 +76,7 @@ pub fn compile_wasm(
 
     write_section(f, WASM_CODE_SECTION, &code_section(&funcs, &types)?)?;
 
-    write_section(f, WASM_DATA_SECTION, &data_section()?)?;
+    write_section(f, WASM_DATA_SECTION, &data_section(&const_table)?)?;
 
     Ok(())
 }
@@ -109,11 +110,12 @@ fn codegen(
     mut disasm_f: Option<&mut dyn Write>,
     typeinf_f: Option<&mut dyn Write>,
     debug_type_infer: bool,
-) -> CompileResult<Vec<FuncDef>> {
+) -> CompileResult<(Vec<FuncDef>, ConstTable)> {
+    let mut const_table = ConstTable::new();
     let mut funcs = vec![];
 
-    let (malloc_ty, malloc_fn) =
-        Compiler::malloc(types, imports, &mut funcs).map_err(|e| CompileError::Compile(e))?;
+    let (malloc_ty, malloc_fn) = Compiler::malloc(types, imports, &mut const_table, &mut funcs)
+        .map_err(|e| CompileError::Compile(e))?;
 
     if let Some(ref mut disasm_f) = disasm_f {
         let func_ty = &types[malloc_ty];
@@ -121,8 +123,8 @@ fn codegen(
         disasm_func(&funcs[malloc_fn], &func_ty, disasm_f)?;
     }
 
-    let (set_ty, set_fn) =
-        Compiler::compile_set(types, imports, &mut funcs).map_err(|e| CompileError::Compile(e))?;
+    let (set_ty, set_fn) = Compiler::compile_set(types, imports, &mut const_table, &mut funcs)
+        .map_err(|e| CompileError::Compile(e))?;
 
     if let Some(ref mut disasm_f) = disasm_f {
         let func_ty = &types[set_ty];
@@ -210,6 +212,7 @@ fn codegen(
             ret_ty,
             types,
             &imports,
+            &mut const_table,
             &mut funcs,
         );
         if let Err(e) = compiler.compile(&func_stmt.stmts, ret_ty) {
@@ -233,7 +236,7 @@ fn codegen(
         }
     }
 
-    Ok(funcs)
+    Ok((funcs, const_table))
 }
 
 fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Result<()> {
@@ -397,7 +400,7 @@ fn memory_section() -> std::io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn data_section() -> std::io::Result<Vec<u8>> {
+fn data_section(const_table: &ConstTable) -> std::io::Result<Vec<u8>> {
     let mut buf = vec![];
 
     encode_leb128(&mut buf, 1)?; // count of data
@@ -405,10 +408,10 @@ fn data_section() -> std::io::Result<Vec<u8>> {
 
     // Constant expression for the size
     buf.push(OpCode::I32Const as u8);
-    encode_leb128(&mut buf, 0x800)?;
+    encode_leb128(&mut buf, const_table.base_addr() as u32)?;
     buf.push(OpCode::End as u8);
 
-    let data = b"Hello, world!";
+    let data = const_table.data();
     encode_leb128(&mut buf, data.len() as u32)?;
     buf.extend_from_slice(data);
     dbg!(&buf);
