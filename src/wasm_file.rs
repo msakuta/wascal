@@ -1,6 +1,6 @@
 //! Code to write wasm file format sections.
 use crate::{
-    compiler::{disasm_func, encode_leb128, Compiler},
+    compiler::{disasm_func, encode_leb128, Compiler, OpCode},
     infer::{run_type_infer, set_infer_debug},
     model::{FuncDef, FuncImport, FuncType},
     parser::{parse, FnDecl, Statement},
@@ -15,6 +15,7 @@ const WASM_FUNCTION_SECTION: u8 = 3;
 const WASM_CODE_SECTION: u8 = 0x0a;
 const WASM_MEMORY_SECTION: u8 = 0x05;
 const WASM_EXPORT_SECTION: u8 = 0x07;
+const WASM_DATA_SECTION: u8 = 11;
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -73,6 +74,8 @@ pub fn compile_wasm(
     write_section(f, WASM_EXPORT_SECTION, &export_section(&funcs, &imports)?)?;
 
     write_section(f, WASM_CODE_SECTION, &code_section(&funcs, &types)?)?;
+
+    write_section(f, WASM_DATA_SECTION, &data_section()?)?;
 
     Ok(())
 }
@@ -236,7 +239,7 @@ fn codegen(
 fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Result<()> {
     f.write_all(&[section])?;
     encode_leb128(f, payload.len() as u32)?;
-    f.write_all(&payload)?;
+    f.write_all(payload)?;
     Ok(())
 }
 
@@ -391,6 +394,24 @@ fn memory_section() -> std::io::Result<Vec<u8>> {
     buf.push(NO_LIMIT);
     encode_leb128(&mut buf, INITIAL_PAGES as u32)?;
 
+    Ok(buf)
+}
+
+fn data_section() -> std::io::Result<Vec<u8>> {
+    let mut buf = vec![];
+
+    encode_leb128(&mut buf, 1)?; // count of data
+    encode_leb128(&mut buf, 0)?; // memidx
+
+    // Constant expression for the size
+    buf.push(OpCode::I32Const as u8);
+    encode_leb128(&mut buf, 0x800)?;
+    buf.push(OpCode::End as u8);
+
+    let data = b"Hello, world!";
+    encode_leb128(&mut buf, data.len() as u32)?;
+    buf.extend_from_slice(data);
+    dbg!(&buf);
     Ok(buf)
 }
 
