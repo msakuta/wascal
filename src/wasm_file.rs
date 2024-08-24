@@ -118,11 +118,16 @@ fn codegen(
         disasm_func(&funcs[malloc_fn], &func_ty, disasm_f)?;
     }
 
+    println!("functions before type infer:");
+    for func in &funcs {
+        println!("  {}", func.name);
+    }
+
     let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
 
     set_infer_debug(debug_type_infer);
 
-    run_type_infer(&mut stmts, types, imports, typeinf_f)?;
+    run_type_infer(&mut stmts, types, imports, &funcs, typeinf_f)?;
 
     fn find_funcs<'a>(stmts: &'a [Statement<'a>], funcs: &mut Vec<&FnDecl<'a>>) {
         for stmt in stmts.iter() {

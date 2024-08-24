@@ -3,7 +3,7 @@
 use std::{collections::HashMap, io::Write};
 
 use crate::{
-    model::TypeSet,
+    model::{FuncDef, TypeSet},
     parser::{format_params, format_stmt, Expression, Statement},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
@@ -87,10 +87,11 @@ impl<'a> TypeInferer<'a> {
                 .get(*name)
                 .copied()
                 .unwrap_or(TypeSet::default())),
-            Expression::FnInvoke(name, _) => Ok(dbg!(self
+            Expression::FnInvoke(name, _) => self
                 .funcs
                 .get(*name)
-                .map_or(TypeSet::ALL, |f| f.ret_ty))),
+                .map(|f| f.ret_ty)
+                .ok_or_else(|| format!("Function {name} not found")),
             Expression::Cast(_ex, ty) => Ok((*ty).into()),
             Expression::Neg(ex) => self.forward_type_expr(ex),
             Expression::Add(lhs, rhs)
@@ -362,6 +363,7 @@ pub fn run_type_infer(
     stmts: &mut [Statement],
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
+    funcs: &[FuncDef],
     typeinf_f: Option<&mut dyn Write>,
 ) -> CompileResult<()> {
     let mut type_infer_funcs = HashMap::new();
@@ -375,6 +377,19 @@ pub fn run_type_infer(
                     .results
                     .get(0)
                     .map_or(TypeSet::default(), |v| (*v).into()),
+            },
+        );
+    }
+    for func in funcs {
+        let func_ty = &types[func.ty];
+        type_infer_funcs.insert(
+            func.name.clone(),
+            TypeInferFn {
+                params: func_ty.params.clone(),
+                ret_ty: func_ty
+                    .results
+                    .get(0)
+                    .map_or(TypeSet::VOID, |f| (*f).into()),
             },
         );
     }

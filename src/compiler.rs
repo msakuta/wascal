@@ -207,7 +207,6 @@ impl<'a> Compiler<'a> {
         // encode_leb128(&mut self.code, 0).unwrap();
 
         let last = self.emit_stmts(ast, ty)?;
-        dbg!(&last);
 
         self.code.push(OpCode::End as u8);
         Ok(last)
