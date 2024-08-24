@@ -1,13 +1,13 @@
 mod malloc;
 mod set;
+mod strcat;
 
 use std::io::{Read, Write};
 
 use crate::{
-    const_table::{self, ConstTable},
+    const_table::ConstTable,
     model::{FuncDef, FuncImport, FuncType, Type},
     parser::{Expression, For, Statement, VarDecl},
-    wasm_file::CompileResult,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -156,7 +156,7 @@ struct TypeMap {
     i64: OpCode,
     f32: OpCode,
     f64: OpCode,
-    st: Option<Box<dyn Fn(&Compiler) -> CompileResult<()>>>,
+    st: Option<Box<dyn Fn(&mut Compiler) -> Result<(), String>>>,
 }
 
 const LT_TYPE_MAP: TypeMap = TypeMap {
@@ -189,9 +189,16 @@ impl<'a> Compiler<'a> {
         const_table: &'a mut ConstTable,
         funcs: &'a mut Vec<FuncDef>,
     ) -> Self {
+        let mut locals = args;
+        if ret_ty == Type::Str {
+            locals.push(VarDecl {
+                name: "ret_buf".to_string(),
+                ty: Type::I32.into(),
+            });
+        }
         Self {
             code: vec![],
-            locals: args,
+            locals,
             ret_ty,
             types,
             imports,
@@ -219,18 +226,36 @@ impl<'a> Compiler<'a> {
         Ok(last)
     }
 
+    fn find_func(&self, name: &str) -> Result<(usize, Type), String> {
+        let (idx, ret) = self
+            .funcs
+            .iter()
+            .enumerate()
+            .find(|(_, func)| func.name == name)
+            .ok_or_else(|| format!("{name} not found"))?;
+        Ok((
+            idx + self.imports.len(),
+            self.types[ret.ty]
+                .results
+                .get(0)
+                .copied()
+                .unwrap_or(Type::Void),
+        ))
+    }
+
+    /// Find and call a function with a name
+    fn call_func(&mut self, name: &str) -> Result<Type, String> {
+        let (func_id, ret_ty) = self.find_func(name)?;
+        self.code.push(OpCode::Call as u8);
+        encode_leb128(&mut self.code, func_id as u32).map_err(|e| e.to_string())?;
+        Ok(ret_ty)
+    }
+
     fn define_reverse(&mut self) -> Result<Type, String> {
         // get length of the string
         self.local_get(1);
 
-        let malloc_id = self
-            .funcs
-            .iter()
-            .enumerate()
-            .find(|(_, func)| func.name == "malloc")
-            .ok_or_else(|| "malloc not found".to_string())?
-            .0
-            + self.imports.len();
+        let (malloc_id, _) = self.find_func("malloc")?;
 
         // Allocate another chunk of memory with the same length
         // let new_buf = self.bump()?;
@@ -470,7 +495,13 @@ impl<'a> Compiler<'a> {
                     f32: OpCode::F32Add,
                     f64: OpCode::F64Add,
                     st: Some(Box::new(|this| {
-                        // this.
+                        this.i32const(8);
+                        let ret_malloc_ty = this.call_func("malloc")?;
+                        let ret_buf_idx = this.add_local("", ret_malloc_ty);
+                        this.local_get(ret_buf_idx);
+                        this.call_func("strcat")?;
+                        this.local_get(ret_buf_idx);
+                        this.i32load(4)?;
                         Ok(())
                     })),
                 },
@@ -579,6 +610,14 @@ impl<'a> Compiler<'a> {
             (Type::F64, Type::I32) => {
                 self.code.push(OpCode::F64ConvertI32S as u8);
                 (ty_map.f64, Type::F64)
+            }
+            (Type::Str, Type::Str) => {
+                if let Some(f) = ty_map.st.as_ref() {
+                    f(self)?;
+                    return Ok(Type::Str);
+                } else {
+                    return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                }
             }
             _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
         };
@@ -710,7 +749,7 @@ impl<'a> Compiler<'a> {
 
         // If a string is returned, return only the pointer to the head
         if last_ty == Type::Str {
-            self.code.push(OpCode::Drop as u8);
+            // self.code.push(OpCode::Drop as u8);
         }
 
         Ok(last_ty)

@@ -1,9 +1,4 @@
-use crate::{
-    const_table::{self, ConstTable},
-    model::FuncDef,
-    parser::VarDecl,
-    FuncImport, FuncType, Type,
-};
+use crate::{const_table::ConstTable, model::FuncDef, parser::VarDecl, FuncImport, FuncType, Type};
 
 use super::{Compiler, OpCode};
 

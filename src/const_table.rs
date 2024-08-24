@@ -25,7 +25,7 @@ impl ConstTable {
     }
 
     pub fn base_addr(&self) -> usize {
-        self.base_addr
+        self.base_addr + 4
     }
 
     pub fn data(&self) -> &[u8] {

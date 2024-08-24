@@ -114,23 +114,7 @@ fn codegen(
     let mut const_table = ConstTable::new();
     let mut funcs = vec![];
 
-    let (malloc_ty, malloc_fn) = Compiler::malloc(types, imports, &mut const_table, &mut funcs)
-        .map_err(|e| CompileError::Compile(e))?;
-
-    if let Some(ref mut disasm_f) = disasm_f {
-        let func_ty = &types[malloc_ty];
-
-        disasm_func(&funcs[malloc_fn], &func_ty, disasm_f)?;
-    }
-
-    let (set_ty, set_fn) = Compiler::compile_set(types, imports, &mut const_table, &mut funcs)
-        .map_err(|e| CompileError::Compile(e))?;
-
-    if let Some(ref mut disasm_f) = disasm_f {
-        let func_ty = &types[set_ty];
-
-        disasm_func(&funcs[set_fn], &func_ty, disasm_f)?;
-    }
+    compile_std_lib(types, imports, &mut const_table, &mut funcs, &mut disasm_f)?;
 
     let std_fns = funcs.len();
 
@@ -237,6 +221,43 @@ fn codegen(
     }
 
     Ok((funcs, const_table))
+}
+
+fn compile_std_lib(
+    types: &mut Vec<FuncType>,
+    imports: &[FuncImport],
+    const_table: &mut ConstTable,
+    funcs: &mut Vec<FuncDef>,
+    disasm_f: &mut Option<&mut dyn Write>,
+) -> CompileResult<()> {
+    let (malloc_ty, malloc_fn) = Compiler::malloc(types, imports, const_table, funcs)
+        .map_err(|e| CompileError::Compile(e))?;
+
+    if let Some(ref mut disasm_f) = disasm_f {
+        let func_ty = &types[malloc_ty];
+
+        disasm_func(&funcs[malloc_fn], &func_ty, disasm_f)?;
+    }
+
+    let (set_ty, set_fn) = Compiler::compile_set(types, imports, const_table, funcs)
+        .map_err(|e| CompileError::Compile(e))?;
+
+    if let Some(ref mut disasm_f) = disasm_f {
+        let func_ty = &types[set_ty];
+
+        disasm_func(&funcs[set_fn], &func_ty, disasm_f)?;
+    }
+
+    let (strcat_ty, strcat_fn) = Compiler::compile_strcat(types, imports, const_table, funcs)
+        .map_err(|e| CompileError::Compile(e))?;
+
+    if let Some(ref mut disasm_f) = disasm_f {
+        let func_ty = &types[strcat_ty];
+
+        disasm_func(&funcs[strcat_fn], &func_ty, disasm_f)?;
+    }
+
+    Ok(())
 }
 
 fn write_section(f: &mut impl Write, section: u8, payload: &[u8]) -> std::io::Result<()> {
@@ -414,7 +435,7 @@ fn data_section(const_table: &ConstTable) -> std::io::Result<Vec<u8>> {
     let data = const_table.data();
     encode_leb128(&mut buf, data.len() as u32)?;
     buf.extend_from_slice(data);
-    dbg!(&buf);
+    println!("data section has {} bytes", buf.len());
     Ok(buf)
 }
 
