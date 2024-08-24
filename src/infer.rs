@@ -4,7 +4,7 @@ use std::{collections::HashMap, io::Write};
 
 use crate::{
     model::TypeSet,
-    parser::{format_stmt, Expression, Statement},
+    parser::{format_params, format_stmt, Expression, Statement},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
 };
@@ -42,6 +42,10 @@ fn get_type_infer_fns(
 ) -> Result<(), String> {
     match stmt {
         Statement::FnDecl(fn_decl) => {
+            let mut buf = vec![];
+            format_stmt(stmt, 0, &mut buf).map_err(|e| e.to_string())?;
+            let ast_str = String::from_utf8(buf).map_err(|e| e.to_string())?;
+            println!("before infer: {}", ast_str);
             funcs.insert(
                 fn_decl.name.to_string(),
                 TypeInferFn {
@@ -83,9 +87,10 @@ impl<'a> TypeInferer<'a> {
                 .get(*name)
                 .copied()
                 .unwrap_or(TypeSet::default())),
-            Expression::FnInvoke(name, _) => {
-                Ok(self.funcs.get(*name).map_or(TypeSet::ALL, |f| f.ret_ty))
-            }
+            Expression::FnInvoke(name, _) => Ok(dbg!(self
+                .funcs
+                .get(*name)
+                .map_or(TypeSet::ALL, |f| f.ret_ty))),
             Expression::Cast(_ex, ty) => Ok((*ty).into()),
             Expression::Neg(ex) => self.forward_type_expr(ex),
             Expression::Add(lhs, rhs)

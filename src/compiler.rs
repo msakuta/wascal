@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use crate::{
     model::{FuncDef, FuncImport, FuncType, Type},
     parser::{Expression, For, Statement, VarDecl},
+    wasm_file::CompileResult,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -151,6 +152,7 @@ struct TypeMap {
     i64: OpCode,
     f32: OpCode,
     f64: OpCode,
+    st: Option<Box<dyn Fn(&Compiler) -> CompileResult<()>>>,
 }
 
 const LT_TYPE_MAP: TypeMap = TypeMap {
@@ -158,6 +160,7 @@ const LT_TYPE_MAP: TypeMap = TypeMap {
     i64: OpCode::I64LtS,
     f32: OpCode::F32Lt,
     f64: OpCode::F64Lt,
+    st: None,
 };
 
 /// A environment for compiling a function. Note that a program is made of multiple functions,
@@ -203,6 +206,14 @@ impl<'a> Compiler<'a> {
         // self.code.push(OpCode::LocalGet as u8);
         // encode_leb128(&mut self.code, 0).unwrap();
 
+        let last = self.emit_stmts(ast, ty)?;
+        dbg!(&last);
+
+        self.code.push(OpCode::End as u8);
+        Ok(last)
+    }
+
+    fn define_reverse(&mut self) -> Result<Type, String> {
         // get length of the string
         self.local_get(1);
 
@@ -247,8 +258,6 @@ impl<'a> Compiler<'a> {
             Ok(())
         })?;
 
-        // let last = self.emit_stmts(ast, ty)?;
-
         // Allocate buffer to return string
         self.i32const(8);
         self.code.push(OpCode::Call as u8);
@@ -268,8 +277,6 @@ impl<'a> Compiler<'a> {
         self.i32store(4)?;
 
         self.local_get(ret_buf);
-
-        self.code.push(OpCode::End as u8);
         Ok(Type::I32)
     }
 
@@ -529,6 +536,10 @@ impl<'a> Compiler<'a> {
                     i64: OpCode::I64Add,
                     f32: OpCode::F32Add,
                     f64: OpCode::F64Add,
+                    st: Some(Box::new(|this| {
+                        // this.
+                        Ok(())
+                    })),
                 },
             ),
             Expression::Sub(lhs, rhs) => self.emit_bin_op(
@@ -540,6 +551,7 @@ impl<'a> Compiler<'a> {
                     i64: OpCode::I64Sub,
                     f32: OpCode::F32Sub,
                     f64: OpCode::F64Sub,
+                    st: None,
                 },
             ),
             Expression::Mul(lhs, rhs) => self.emit_bin_op(
@@ -551,6 +563,7 @@ impl<'a> Compiler<'a> {
                     i64: OpCode::I64Mul,
                     f32: OpCode::F32Mul,
                     f64: OpCode::F64Mul,
+                    st: None,
                 },
             ),
             Expression::Div(lhs, rhs) => self.emit_bin_op(
@@ -562,6 +575,7 @@ impl<'a> Compiler<'a> {
                     i64: OpCode::I64DivS,
                     f32: OpCode::F32Div,
                     f64: OpCode::F64Div,
+                    st: None,
                 },
             ),
             Expression::Lt(lhs, rhs) => self.emit_cmp_op(lhs, rhs, "lt", LT_TYPE_MAP),
@@ -574,6 +588,7 @@ impl<'a> Compiler<'a> {
                     i64: OpCode::I64GtS,
                     f32: OpCode::F32Gt,
                     f64: OpCode::F64Gt,
+                    st: None,
                 },
             ),
             Expression::Conditional(cond, t_branch, f_branch) => {
@@ -745,14 +760,14 @@ impl<'a> Compiler<'a> {
         let mut last_ty = Type::Void;
         if 1 <= stmts.len() {
             for stmt in &stmts[..stmts.len() - 1] {
-                if last_ty != Type::Void {
+                for _ in 0..last_ty.word_count() {
                     self.code.push(OpCode::Drop as u8);
                 }
                 last_ty = self.emit_stmt(stmt, Type::Void)?;
             }
         }
         if let Some(last_stmt) = stmts.last() {
-            if last_ty != Type::Void {
+            for _ in 0..last_ty.word_count() {
                 self.code.push(OpCode::Drop as u8);
             }
             last_ty = self.emit_stmt(last_stmt, ty)?;

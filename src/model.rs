@@ -23,6 +23,17 @@ impl Type {
             Self::Str => 0x0,
         }
     }
+
+    /// Returns the number of words to represent this value.
+    /// Primitive types typically have a single word, while most variable-length type
+    /// has 2 words (a pointer and a size), and Void type has 0 words.
+    pub(crate) fn word_count(&self) -> usize {
+        match self {
+            Self::Str => 2,
+            Self::I32 | Self::I64 | Self::F32 | Self::F64 => 1,
+            Self::Void => 0,
+        }
+    }
 }
 
 impl From<u8> for Type {
@@ -48,6 +59,7 @@ impl TryFrom<&str> for Type {
             "f32" => Type::F32,
             "f64" => Type::F64,
             "void" => Type::Void,
+            "str" => Type::Str,
             _ => return Err(format!("Unknown type {}", value)),
         })
     }
@@ -131,11 +143,11 @@ impl TypeSet {
         f32: true,
         f64: true,
         void: true,
-        st: false,
+        st: true,
     };
 
     pub fn is_none(&self) -> bool {
-        !self.i32 && !self.i64 && !self.f32 && !self.f64
+        !self.i32 && !self.i64 && !self.f32 && !self.f64 && !self.st
     }
 
     pub fn determine(&self) -> Option<Type> {
@@ -196,39 +208,26 @@ impl From<Type> for TypeSet {
 
 impl std::fmt::Display for TypeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.i32 & self.i64 & self.f32 & self.f64 & self.void & self.st {
+            return write!(f, "any");
+        }
         let mut written = false;
-        if self.i32 {
-            write!(f, "i32")?;
-            written = true;
-        }
-        if self.i64 {
-            if written {
-                write!(f, "|")?;
+        let mut write_ty = |val, name| {
+            if val {
+                if written {
+                    write!(f, "|")?;
+                }
+                write!(f, "{name}")?;
+                written = true;
             }
-            write!(f, "i64")?;
-            written = true;
-        }
-        if self.f32 {
-            if written {
-                write!(f, "|")?;
-            }
-            write!(f, "f32")?;
-            written = true;
-        }
-        if self.f64 {
-            if written {
-                write!(f, "|")?;
-            }
-            write!(f, "f64")?;
-            written = true;
-        }
-        if self.void {
-            if written {
-                write!(f, "|")?;
-            }
-            write!(f, "void")?;
-            written = true;
-        }
+            Ok(())
+        };
+        write_ty(self.i32, "i32")?;
+        write_ty(self.i64, "i64")?;
+        write_ty(self.f32, "f32")?;
+        write_ty(self.f64, "f64")?;
+        write_ty(self.void, "void")?;
+        write_ty(self.st, "str")?;
         if !written {
             write!(f, "(none)")?;
         }

@@ -653,12 +653,7 @@ pub fn format_stmt(
         Statement::FnDecl(func) => {
             let public = if func.public { "pub " } else { "" };
             write!(f, "{public}let {}(", func.name)?;
-            for (i, param) in func.params.iter().enumerate() {
-                write!(f, "{}: {}", param.name, param.ty)?;
-                if i != func.params.len() - 1 {
-                    write!(f, ", ")?;
-                }
-            }
+            format_params(&func.params, f)?;
             write!(f, ") -> {} =", func.ret_ty)?;
             for stmt in &func.stmts {
                 format_stmt(stmt, level + 1, f)?;
@@ -686,4 +681,14 @@ pub fn format_stmt(
             writeln!(f, ";")
         }
     }
+}
+
+pub fn format_params(params: &[VarDecl], f: &mut impl std::io::Write) -> std::io::Result<()> {
+    for (i, param) in params.iter().enumerate() {
+        write!(f, "{}: {}", param.name, param.ty)?;
+        if i != params.len() - 1 {
+            write!(f, ", ")?;
+        }
+    }
+    Ok(())
 }
