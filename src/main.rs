@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut f = std::io::BufWriter::new(std::fs::File::create("wascal.wasm")?);
 
     let mut file_name = "scripts/hello.wscl".to_string();
+    let mut bind_f = std::io::BufWriter::new(std::fs::File::create("wascal.js")?);
     let mut debug_type_infer = false;
     let mut enable_disasm = false;
     for arg in std::env::args().skip(1) {
@@ -49,6 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     compile_wasm(
         &mut f,
+        &mut bind_f,
         &source,
         &mut types,
         &imports,

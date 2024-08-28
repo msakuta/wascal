@@ -189,13 +189,7 @@ impl<'a> Compiler<'a> {
         const_table: &'a mut ConstTable,
         funcs: &'a mut Vec<FuncDef>,
     ) -> Self {
-        let mut locals = args;
-        if ret_ty == Type::Str {
-            locals.push(VarDecl {
-                name: "ret_buf".to_string(),
-                ty: Type::I32.into(),
-            });
-        }
+        let locals = args;
         Self {
             code: vec![],
             locals,
@@ -401,9 +395,8 @@ impl<'a> Compiler<'a> {
                 Ok(ret)
             }
             Expression::StrLiteral(s) => {
-                let (ptr, len) = self.const_table.add_const(s, s.as_bytes());
-                self.i32const(ptr as u32);
-                self.i32const(len as u32);
+                let str = self.const_table.add_str(s, s);
+                self.i32const(str as u32);
                 Ok(Type::Str)
             }
             Expression::Variable(name) => {
@@ -495,13 +488,7 @@ impl<'a> Compiler<'a> {
                     f32: OpCode::F32Add,
                     f64: OpCode::F64Add,
                     st: Some(Box::new(|this| {
-                        this.i32const(8);
-                        let ret_malloc_ty = this.call_func("malloc")?;
-                        let ret_buf_idx = this.add_local("", ret_malloc_ty);
-                        this.local_get(ret_buf_idx);
                         this.call_func("strcat")?;
-                        this.local_get(ret_buf_idx);
-                        this.i32load(4)?;
                         Ok(())
                     })),
                 },

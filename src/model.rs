@@ -29,8 +29,7 @@ impl Type {
     /// has 2 words (a pointer and a size), and Void type has 0 words.
     pub(crate) fn word_count(&self) -> usize {
         match self {
-            Self::Str => 2,
-            Self::I32 | Self::I64 | Self::F32 | Self::F64 => 1,
+            Self::Str | Self::I32 | Self::I64 | Self::F32 | Self::F64 => 1,
             Self::Void => 0,
         }
     }

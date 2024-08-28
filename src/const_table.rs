@@ -24,6 +24,17 @@ impl ConstTable {
         ret
     }
 
+    /// Strings are encoded as [len, bytes...] unlike Rust, because in this way we can represent it with a pointer.
+    pub fn add_str(&mut self, name: impl Into<String>, value: &str) -> usize {
+        let ptr = self.buf.len() + self.base_addr;
+        self.buf
+            .extend_from_slice(&(value.len() as u32).to_le_bytes());
+        self.buf.extend_from_slice(value.as_bytes());
+        let ret = (ptr, value.len());
+        self.consts.insert(name.into(), ret);
+        ptr
+    }
+
     pub fn base_addr(&self) -> usize {
         self.base_addr + 4
     }

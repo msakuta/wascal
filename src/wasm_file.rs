@@ -45,6 +45,7 @@ pub type CompileResult<T> = Result<T, CompileError>;
 
 pub fn compile_wasm(
     f: &mut impl Write,
+    bind: &mut impl Write,
     source: &str,
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
@@ -56,6 +57,7 @@ pub fn compile_wasm(
     f.write_all(&WASM_BINARY_VERSION)?;
 
     let (funcs, const_table) = codegen(
+        bind,
         source,
         types,
         imports,
@@ -88,7 +90,8 @@ pub fn disasm_wasm(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
 ) -> CompileResult<()> {
-    let _ = codegen(source, types, imports, Some(f), None, false)?;
+    let mut sink = std::io::sink();
+    let _ = codegen(&mut sink, source, types, imports, Some(f), None, false)?;
     Ok(())
 }
 
@@ -99,11 +102,13 @@ pub fn typeinf_wasm(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
 ) -> CompileResult<()> {
-    let _ = codegen(source, types, imports, None, Some(f), false)?;
+    let mut sink = std::io::sink();
+    let _ = codegen(&mut sink, source, types, imports, None, Some(f), false)?;
     Ok(())
 }
 
 fn codegen(
+    bind: &mut impl Write,
     source: &str,
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
@@ -122,6 +127,9 @@ fn codegen(
     for func in &funcs {
         println!("  {}", func.name);
     }
+
+    // Include boilerplate code for binding
+    writeln!(bind, "{}", include_str!("../header.js"))?;
 
     let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
 
@@ -218,6 +226,15 @@ fn codegen(
 
             disasm_func(&func, &func_ty, disasm_f)?;
         }
+
+        writeln!(
+            bind,
+            r#"export function {}() {{
+    const ret = obj.instance.exports.{}();
+    return returnString(ret);
+}}"#,
+            func.name, func.name
+        )?;
     }
 
     Ok((funcs, const_table))
@@ -316,7 +333,7 @@ fn functions_section(funcs: &[FuncDef]) -> std::io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn code_section(funcs: &[FuncDef], types: &[FuncType]) -> std::io::Result<Vec<u8>> {
+fn code_section(funcs: &[FuncDef], types: &[FuncType]) -> CompileResult<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
 
     buf.write_all(&[funcs.len() as u8])?;
@@ -330,7 +347,8 @@ fn code_section(funcs: &[FuncDef], types: &[FuncType]) -> std::io::Result<Vec<u8
     Ok(buf)
 }
 
-fn code_single(fun: &FuncDef, types: &[FuncType]) -> std::io::Result<Vec<u8>> {
+/// Write a single function parameter types, return type and bytecode
+fn code_single(fun: &FuncDef, types: &[FuncType]) -> CompileResult<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
 
     let fn_type = &types[fun.ty];
@@ -348,7 +366,7 @@ fn code_single(fun: &FuncDef, types: &[FuncType]) -> std::io::Result<Vec<u8>> {
                     buf.push(
                         last.determine()
                             .ok_or_else(|| {
-                                std::io::Error::other(
+                                CompileError::Compile(
                                     "Param type could not be determined".to_string(),
                                 )
                             })?
