@@ -36,14 +36,26 @@ pub(crate) enum OpCode {
     I32LtU = 0x49,
     I32GtS = 0x4a,
     I32GtU = 0x4b,
+    I32LeS = 0x4c,
+    I32LeU = 0x4d,
+    I32GeS = 0x4e,
+    I32GeU = 0x4f,
     I64LtS = 0x53,
     I64LtU = 0x54,
     I64GtS = 0x55,
     I64GtU = 0x56,
+    I64LeS = 0x57,
+    I64LeU = 0x58,
+    I64GeS = 0x59,
+    I64GeU = 0x5a,
     F32Lt = 0x5d,
     F32Gt = 0x5e,
+    F32Le = 0x5f,
+    F32Ge = 0x60,
     F64Lt = 0x63,
     F64Gt = 0x64,
+    F64Le = 0x65,
+    F64Ge = 0x66,
     I32Add = 0x6a,
     I32Sub = 0x6b,
     I32Mul = 0x6c,
@@ -118,14 +130,26 @@ impl_op_from!(
     I32LtU: "i32.lt_u",
     I32GtS: "i32.gt_s",
     I32GtU: "i32.gt_u",
+    I32LeS: "i32.le_s",
+    I32LeU: "i32.le_u",
+    I32GeS: "i32.ge_s",
+    I32GeU: "i32.ge_u",
     I64LtS: "i64.lt_s",
     I64LtU: "i64.lt_u",
     I64GtS: "i64.gt_s",
     I64GtU: "i64.gt_u",
+    I64LeS: "i64.le_s",
+    I64LeU: "i64.le_u",
+    I64GeS: "i64.ge_s",
+    I64GeU: "i64.ge_u",
     F32Lt: "f32.lt",
     F32Gt: "f32.gt",
+    F32Le: "f32.le",
+    F32Ge: "f32.ge",
     F64Lt: "f64.lt",
     F64Gt: "f64.gt",
+    F64Le: "f64.le",
+    F64Ge: "f64.ge",
     I32Add: "i32.add",
     I32Sub: "i32.sub",
     I32Mul: "i32.mul",
@@ -789,13 +813,13 @@ impl<'a> Compiler<'a> {
         self.code.push(Type::Void.code());
 
         // End condition
-        self.local_get(end);
         self.local_get(idx);
+        self.local_get(end);
         self.code.push(match iter_ty {
-            Type::I32 => OpCode::I32LtS,
-            Type::I64 => OpCode::I64LtS,
-            Type::F32 => OpCode::F32Lt,
-            Type::F64 => OpCode::F64Lt,
+            Type::I32 => OpCode::I32GeS,
+            Type::I64 => OpCode::I64GeS,
+            Type::F32 => OpCode::F32Ge,
+            Type::F64 => OpCode::F64Ge,
             _ => return Err("For loop iteration variable has void type".to_string()),
         } as u8);
         self.code.push(OpCode::BrIf as u8);
@@ -1009,12 +1033,14 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let arg = f64::from_le_bytes(buf);
                 writeln!(f, "{indent}f64.const {arg}")?;
             }
-            I32LtS | I32LtU | I32GtS | I32GtU | I32Add | I32Sub | I32Mul | I32DivS | I32And
-            | I64LtS | I64LtU | I64GtS | I64GtU | I64Add | I64Sub | I64Mul | I64DivS | F32Neg
-            | F32Lt | F32Gt | F32Add | F32Sub | F32Mul | F32Div | F64Neg | F64Lt | F64Gt
-            | F64Add | F64Sub | F64Mul | F64Div | I32WrapI64 | I32TruncF32S | I32TruncF64S
-            | I64ExtendI32S | I64TruncF32S | I64TruncF64S | F32ConvertI32S | F32ConvertI64S
-            | F32DemoteF64 | F64ConvertI32S | F64ConvertI64S | F64PromoteF32 => {
+            I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS | I32GeU | I32Add
+            | I32Sub | I32Mul | I32DivS | I32And | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS
+            | I64LeU | I64GeS | I64GeU | I64Add | I64Sub | I64Mul | I64DivS | F32Neg | F32Lt
+            | F32Gt | F32Le | F32Ge | F32Add | F32Sub | F32Mul | F32Div | F64Neg | F64Lt
+            | F64Gt | F64Le | F64Ge | F64Add | F64Sub | F64Mul | F64Div | I32WrapI64
+            | I32TruncF32S | I32TruncF64S | I64ExtendI32S | I64TruncF32S | I64TruncF64S
+            | F32ConvertI32S | F32ConvertI64S | F32DemoteF64 | F64ConvertI32S | F64ConvertI64S
+            | F64PromoteF32 => {
                 writeln!(f, "{indent}{}", code.to_name())?;
             }
             End => {

@@ -70,6 +70,8 @@ impl<'a> Compiler<'a> {
         let total_len = self.add_local("", Type::I32);
 
         self.local_get(total_len);
+        self.i32const(4);
+        self.code.push(OpCode::I32Add as u8);
         let malloc_ty = self.call_func("malloc")?;
         let new_ptr = self.add_local("", malloc_ty);
 
