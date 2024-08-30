@@ -195,12 +195,13 @@ fn codegen(
         let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
             CompileError::Compile("Could not determine return type by type inference".to_string())
         })?;
+        let args = func_stmt
+            .params
+            .iter()
+            .map(|param| param.clone())
+            .collect::<Vec<_>>();
         let mut compiler = Compiler::new(
-            func_stmt
-                .params
-                .iter()
-                .map(|param| param.clone())
-                .collect::<Vec<_>>(),
+            args.clone(),
             ret_ty,
             types,
             &imports,
@@ -228,6 +229,14 @@ fn codegen(
         }
 
         if func.public {
+            let js_args = args.into_iter().fold("".to_string(), |acc, cur| {
+                if acc.is_empty() {
+                    cur.name.clone()
+                } else {
+                    acc + ", " + &cur.name
+                }
+            });
+
             let return_filter = if ret_ty == Type::Str {
                 "returnString"
             } else {
@@ -236,8 +245,8 @@ fn codegen(
 
             writeln!(
                 bind,
-                r#"export function {}() {{
-    const ret = obj.instance.exports.{}();
+                r#"export function {}({js_args}) {{
+    const ret = obj.instance.exports.{}({js_args});
     return {return_filter}(ret);
 }}"#,
                 func.name, func.name
