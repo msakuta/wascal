@@ -106,7 +106,7 @@ window.addEventListener("load", () => {
             const argElems = functionElems[expName];
             let args = [];
             for (let i = 0; i < expFunc.length; i++) {
-                const x = parseFloat(argElems[i].value);
+                const x = argElems[i].value;
                 args.push(x);
             }
             implib.outputBuf = "";

@@ -229,11 +229,24 @@ fn codegen(
         }
 
         if func.public {
-            let js_args = args.into_iter().fold("".to_string(), |acc, cur| {
+            let js_args = args.iter().fold("".to_string(), |acc, cur| {
                 if acc.is_empty() {
                     cur.name.clone()
                 } else {
                     acc + ", " + &cur.name
+                }
+            });
+
+            let wasm_args = args.iter().fold("".to_string(), |acc, cur| {
+                let arg = if cur.ty == Type::Str.into() {
+                    format!("addStringToWasm({})", cur.name)
+                } else {
+                    format!("parseFloat({})", cur.name)
+                };
+                if acc.is_empty() {
+                    arg
+                } else {
+                    acc + ", " + &arg
                 }
             });
 
@@ -246,7 +259,7 @@ fn codegen(
             writeln!(
                 bind,
                 r#"export function {}({js_args}) {{
-    const ret = obj.instance.exports.{}({js_args});
+    const ret = obj.instance.exports.{}({wasm_args});
     return {return_filter}(ret);
 }}"#,
                 func.name, func.name
