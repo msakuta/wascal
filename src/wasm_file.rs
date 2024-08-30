@@ -227,14 +227,22 @@ fn codegen(
             disasm_func(&func, &func_ty, disasm_f)?;
         }
 
-        writeln!(
-            bind,
-            r#"export function {}() {{
+        if func.public {
+            let return_filter = if ret_ty == Type::Str {
+                "returnString"
+            } else {
+                ""
+            };
+
+            writeln!(
+                bind,
+                r#"export function {}() {{
     const ret = obj.instance.exports.{}();
-    return returnString(ret);
+    return {return_filter}(ret);
 }}"#,
-            func.name, func.name
-        )?;
+                func.name, func.name
+            )?;
+        }
     }
 
     Ok((funcs, const_table))
