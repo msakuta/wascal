@@ -48,8 +48,10 @@ window.addEventListener("load", () => {
         }
     };
 
-    const load = document.getElementById("load");
-    load.addEventListener("click", async () => {
+    const load = document.getElementById("reload");
+    load.addEventListener("click", () => location.reload());
+
+    (async () => {
         console.log("Loading wasm");
         try {
             implib = await import("./wascal.js");
@@ -92,8 +94,8 @@ window.addEventListener("load", () => {
             functions.appendChild(funcElem);
             functionElems[expName] = argElems;
         }
-    });
-    
+    })();
+
     const callFunc = expName => async () => {
         const expFunc = implib[expName];
         console.log("Calling wasm");
@@ -123,7 +125,7 @@ window.addEventListener("load", () => {
     </head>
     <body>
         <h1>Wascal</h1>
-        <button id="load">Load wasm module</button>
+        <button id="reload">Reload wasm module</button>
         <div class="border">
             <h2>Function List</h2>
             <div id="functions" class="leftAlign"></div>
