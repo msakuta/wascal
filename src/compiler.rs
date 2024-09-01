@@ -334,10 +334,10 @@ impl<'a> Compiler<'a> {
         encode_leb128(&mut self.code, val).unwrap();
     }
 
+    #[allow(dead_code)]
     fn i32and(&mut self, val: u32) {
         self.code.push(OpCode::I32And as u8);
         encode_sleb128(&mut self.code, val as i32).unwrap();
-        println!("and: {:?}", &self.code[self.code.len() - 6..]);
     }
 
     fn i32load(&mut self, offset: u32) -> Result<(), String> {
@@ -750,16 +750,10 @@ impl<'a> Compiler<'a> {
             }
         }
         if let Some(last_stmt) = stmts.last() {
-            println!("last_ty: {last_ty}");
             for _ in 0..last_ty.word_count() {
                 self.code.push(OpCode::Drop as u8);
             }
             last_ty = self.emit_stmt(last_stmt, ty)?;
-        }
-
-        // If a string is returned, return only the pointer to the head
-        if last_ty == Type::Str {
-            // self.code.push(OpCode::Drop as u8);
         }
 
         Ok(last_ty)
