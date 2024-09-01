@@ -1,6 +1,8 @@
-import { compile, parse_ast, disasm,
-    // type_check, run_script, parse_ast, compile, disasm, compile_and_run
- } from "../pkg/index.js";
+import * as wasm from "../pkg/index_bg.wasm";
+import { __wbg_set_wasm } from "../pkg/index_bg.js";
+__wbg_set_wasm(wasm);
+import { compile, parse_ast, disasm } from "../pkg/index_bg.js";
+
 
 
 const consoleElem = document.getElementById("console");
