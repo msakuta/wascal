@@ -168,7 +168,15 @@ pub fn disasm_wasm(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
 ) -> CompileResult<()> {
-    let _ = codegen(source, types, imports, Some(f), None, false)?;
+    let (_, const_table) = codegen(source, types, imports, Some(f), None, false)?;
+
+    writeln!(
+        f,
+        "Dump of data section ({} bytes):",
+        const_table.data().len()
+    )?;
+    const_table.print_data(f)?;
+
     Ok(())
 }
 
@@ -522,7 +530,7 @@ fn data_section(const_table: &ConstTable) -> std::io::Result<Vec<u8>> {
     let data = const_table.data();
 
     println!("Dump of data section ({} bytes):", data.len());
-    const_table.print_data();
+    const_table.print_data(&mut std::io::stdout())?;
 
     encode_leb128(&mut buf, data.len() as u32)?;
     buf.extend_from_slice(data);

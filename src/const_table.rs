@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
 #[derive(Default)]
 pub(crate) struct ConstTable {
@@ -56,20 +56,23 @@ impl ConstTable {
         self.buf[..PTR_SIZE].copy_from_slice(&bytes);
     }
 
-    pub fn print_data(&self) {
+    pub fn print_data(&self, f: &mut impl Write) -> std::io::Result<()> {
         const LINE_CHARS: usize = 16;
-        let print_ascii = |buf: &[u8]| {
+
+        fn print_ascii(f: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
             for c in buf {
                 if c.is_ascii() && !c.is_ascii_control() {
-                    print!("{}", *c as char);
+                    write!(f, "{}", *c as char)?;
                 } else {
-                    print!(".");
+                    write!(f, ".")?;
                 }
             }
-        };
+            Ok(())
+        }
+
         for (i, b) in self.buf.iter().enumerate() {
             if i % LINE_CHARS == 0 {
-                print!("\n{:#06x}: ", i);
+                write!(f, "\n{:#06x}: ", i)?;
             }
             let low = ('0'..='9')
                 .chain('a'..='f')
@@ -79,19 +82,21 @@ impl ConstTable {
                 .chain('a'..='f')
                 .nth(((*b >> 4) % 16) as usize)
                 .unwrap();
-            print!("{}{} ", low, high);
+            write!(f, "{}{} ", low, high)?;
             if i % LINE_CHARS == LINE_CHARS - 1 {
                 print_ascii(
+                    f,
                     &self.buf[i / LINE_CHARS * LINE_CHARS..(i / LINE_CHARS + 1) * LINE_CHARS],
-                );
+                )?;
             }
         }
         if self.buf.len() % LINE_CHARS != 0 {
             let prev_boundary = self.buf.len() / LINE_CHARS * LINE_CHARS;
             let skipped = self.buf.len() - prev_boundary;
-            print!("{}", "   ".repeat(skipped));
-            print_ascii(&self.buf[prev_boundary..]);
+            write!(f, "{}", "   ".repeat(skipped))?;
+            print_ascii(f, &self.buf[prev_boundary..])?;
         }
-        println!("");
+        writeln!(f, "")?;
+        Ok(())
     }
 }
