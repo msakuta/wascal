@@ -3,6 +3,12 @@ import { __wbg_set_wasm } from "../pkg/index_bg.js";
 __wbg_set_wasm(wasm);
 import { compile, parse_ast, disasm } from "../pkg/index_bg.js";
 
+import { StreamLanguage } from "@codemirror/language"
+import { EditorState } from "@codemirror/state"
+import { Parser } from "./parser"
+
+import { EditorView, basicSetup } from "codemirror"
+
 
 
 const consoleElem = document.getElementById("console");
@@ -14,7 +20,7 @@ async function runCommon(process) {
     const canvasRect = canvas.getBoundingClientRect();
     canvas.getContext("2d").clearRect(0, 0, canvasRect.width, canvasRect.height);
 
-    const source = document.getElementById("input").value;
+    const source = view.state.doc.toString();
     const start = performance.now();
     try{
         process(source);
@@ -81,10 +87,16 @@ document.getElementById("parseAst").addEventListener("click", () => runCommon(so
     document.getElementById("console").value = result;
 }));
 document.getElementById("compile").addEventListener("click", () => runCommon(async source => {
-    const [wasm, bindStr] = compile(source);
-    const bind = eval(bindStr);
-    bind.init(wasm, opts);
-    consoleElem.value = `Compiled WebAssembly module in ${wasm.length} bytes.`;
+    let bind;
+    try {
+        const [wasm, bindStr] = compile(source);
+        bind = eval(bindStr);
+        bind.init(wasm, opts);
+        consoleElem.value = `Compiled WebAssembly module in ${wasm.length} bytes.`;
+    }
+    catch(e) {
+        consoleElem.value = `Compile failed: ${e}`;
+    }
 
     const functions = document.getElementById("functions");
     while (functions.firstChild) functions.removeChild(functions.firstChild);
@@ -134,10 +146,6 @@ document.getElementById("clearCanvas").addEventListener("click", () => {
     canvas.getContext("2d").clearRect(0, 0, canvasRect.width, canvasRect.height);
 });
 
-document.getElementById("input").value = `
-pub let hello(x: i32, y: i32) = x + y;
-`;
-
 const samples = document.getElementById("samples");
 
 [
@@ -150,12 +158,26 @@ const samples = document.getElementById("samples");
     .forEach(fileName => {
     const link = document.createElement("a");
     link.href = "#";
-    link.addEventListener("click", () => {
-        fetch("scripts/" + fileName)
-            .then(file => file.text())
-            .then(text => document.getElementById("input").value = text);
+    link.addEventListener("click", async () => {
+        const file = await fetch("scripts/" + fileName);
+        const text = await file.text();
+        let size = view.state.doc.length;
+        const trans = view.state.update(
+            {changes: {from: 0, to: size}, sequential: true},
+            {changes: {from: 0, insert: text}, sequential: true});
+        view.dispatch(trans);
     });
     link.innerHTML = fileName;
     samples.appendChild(link);
     samples.append(" ");
+})
+
+let initState = EditorState.create({
+    extensions: [basicSetup, StreamLanguage.define(Parser)],
+    doc: "pub let hello(x: i32, y: i32) = x + y;",
+});
+
+let view = new EditorView({
+    state: initState,
+    parent: document.getElementById("highlighting"),
 })

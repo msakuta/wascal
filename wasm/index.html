@@ -27,7 +27,7 @@
             }
             .border {
                 border: solid black 2px;
-                margin: 0.5em 2em 0.5em 2em;
+                margin: 0.5em 1em 0.5em 1em;
                 padding: 0.5em;
             }
         </style>
@@ -38,8 +38,10 @@
         <div>
             Samples: <span id="samples"></span>
         </div>
-        <div class="code">
-            <textarea  id="input" type="text" cols="120" rows="20" ></textarea>
+
+        <div class="border">
+            <h3>Code</h3>
+            <div id="highlighting" class="leftAlign"></div>
         </div>
 
         <div>
@@ -55,7 +57,8 @@
             <div id="functions" class="leftAlign"></div>
         </div>
 
-        <div class="code">
+        <div class="code border">
+            <h3>Output</h3>
             <textarea  id="console" type="text" readonly cols="120"  rows="20" ></textarea>
         </div>
 
