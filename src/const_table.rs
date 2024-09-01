@@ -82,7 +82,7 @@ impl ConstTable {
                 .chain('a'..='f')
                 .nth(((*b >> 4) % 16) as usize)
                 .unwrap();
-            write!(f, "{}{} ", low, high)?;
+            write!(f, "{}{} ", high, low)?;
             if i % LINE_CHARS == LINE_CHARS - 1 {
                 print_ascii(
                     f,
