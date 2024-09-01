@@ -57,10 +57,10 @@ impl<'a> Compiler<'a> {
     /// of newly created buffer.
     fn codegen_strcat(&mut self) -> Result<(), String> {
         self.local_get(0); // [lhs]
-        self.i32load(4)?; // [lhs_len]
+        self.i32load(0)?; // [lhs_len]
         let lhs_len = self.add_local("", Type::I32);
         self.local_get(1); // [lhs_len, rhs]
-        self.i32load(4)?; // [lhs_len, rhs_len]
+        self.i32load(0)?; // [lhs_len, rhs_len]
         let rhs_len = self.add_local("", Type::I32);
         self.local_get(lhs_len);
         self.local_get(rhs_len);
@@ -76,7 +76,7 @@ impl<'a> Compiler<'a> {
         // Store total length at the beginning of buffer
         self.local_get(new_ptr);
         self.local_get(total_len);
-        self.i32store(4)?;
+        self.i32store(0)?;
 
         self.i32const(0);
         let idx = self.add_local("", Type::I32);
@@ -87,7 +87,7 @@ impl<'a> Compiler<'a> {
 
             this.code.push(OpCode::I32Add as u8); // [idx + lhs]
 
-            this.i32load8_s(8)?; // [mem[idx + lhs]]
+            this.i32load8_s(4)?; // [mem[idx + lhs]]
             let data = this.add_local("", Type::I32); // []
 
             this.local_get(idx); // [idx]
@@ -95,7 +95,7 @@ impl<'a> Compiler<'a> {
             this.code.push(OpCode::I32Add as u8); // [idx + new_ptr]
             this.local_get(data); // [idx + new_ptr, mem[idx + lhs]]
 
-            this.i32store8(8)?; // []
+            this.i32store8(4)?; // []
 
             Ok(())
         })?;
@@ -110,7 +110,7 @@ impl<'a> Compiler<'a> {
 
             this.code.push(OpCode::I32Add as u8); // [idx + rhs]
 
-            this.i32load8_s(8)?; // [mem[idx + rhs]]
+            this.i32load8_s(4)?; // [mem[idx + rhs]]
             let data = this.add_local("", Type::I32); // []
 
             this.local_get(idx); // [idx]
@@ -120,7 +120,7 @@ impl<'a> Compiler<'a> {
             this.code.push(OpCode::I32Add as u8); // [idx + new_ptr + lhs_len]
             this.local_get(data); // [idx + new_ptr + lhs_len, mem[idx + rhs]]
 
-            this.i32store8(8)?; // []
+            this.i32store8(4)?; // []
 
             Ok(())
         })?;

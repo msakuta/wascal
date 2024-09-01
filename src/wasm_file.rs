@@ -97,7 +97,10 @@ fn write_bind(bind: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io
         writeln!(
             bind,
             "{}",
-            HEADER.replace("export async function init", "module.init = async function")
+            HEADER
+                .replace("export async function init", "module.init = async function")
+                .replace("memory =", "module.memory =")
+                .replace("export let memory;", "module.memory = {};")
         )?;
     } else {
         writeln!(bind, "{}", HEADER)?;
@@ -299,6 +302,8 @@ fn codegen(
             disasm_func(&func, &func_ty, disasm_f)?;
         }
     }
+
+    const_table.finish();
 
     Ok((funcs, const_table))
 }
@@ -514,6 +519,10 @@ fn data_section(const_table: &ConstTable) -> std::io::Result<Vec<u8>> {
     buf.push(OpCode::End as u8);
 
     let data = const_table.data();
+
+    println!("Dump of data section ({} bytes):", data.len());
+    const_table.print_data();
+
     encode_leb128(&mut buf, data.len() as u32)?;
     buf.extend_from_slice(data);
     println!("data section has {} bytes", buf.len());

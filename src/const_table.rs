@@ -8,15 +8,20 @@ pub(crate) struct ConstTable {
     consts: HashMap<String, (usize, usize)>,
 }
 
+const PTR_SIZE: usize = std::mem::size_of::<i32>();
+
 impl ConstTable {
     pub fn new() -> Self {
+        let mut buf = vec![];
+        buf.extend_from_slice(&0u32.to_le_bytes());
         Self {
-            base_addr: 0x800,
+            base_addr: 0,
+            buf,
             ..Self::default()
         }
     }
 
-    pub fn add_const(&mut self, name: impl Into<String>, value: &[u8]) -> (usize, usize) {
+    pub fn _add_const(&mut self, name: impl Into<String>, value: &[u8]) -> (usize, usize) {
         let ptr = self.buf.len() + self.base_addr;
         self.buf.extend_from_slice(value);
         let ret = (ptr, value.len());
@@ -26,7 +31,10 @@ impl ConstTable {
 
     /// Strings are encoded as [len, bytes...] unlike Rust, because in this way we can represent it with a pointer.
     pub fn add_str(&mut self, name: impl Into<String>, value: &str) -> usize {
-        let ptr = self.buf.len() + self.base_addr;
+        // Round up to I32 alignment
+        let ptr = (self.buf.len() + self.base_addr + PTR_SIZE - 1) / PTR_SIZE * PTR_SIZE;
+        // Pad the gap
+        self.buf.resize(ptr, 0);
         self.buf
             .extend_from_slice(&(value.len() as u32).to_le_bytes());
         self.buf.extend_from_slice(value.as_bytes());
@@ -36,10 +44,54 @@ impl ConstTable {
     }
 
     pub fn base_addr(&self) -> usize {
-        self.base_addr + 4
+        self.base_addr
     }
 
     pub fn data(&self) -> &[u8] {
         &self.buf
+    }
+
+    pub fn finish(&mut self) {
+        let bytes = (self.buf.len() as u32).to_le_bytes();
+        self.buf[..PTR_SIZE].copy_from_slice(&bytes);
+    }
+
+    pub fn print_data(&self) {
+        const LINE_CHARS: usize = 16;
+        let print_ascii = |buf: &[u8]| {
+            for c in buf {
+                if c.is_ascii() && !c.is_ascii_control() {
+                    print!("{}", *c as char);
+                } else {
+                    print!(".");
+                }
+            }
+        };
+        for (i, b) in self.buf.iter().enumerate() {
+            if i % LINE_CHARS == 0 {
+                print!("\n{:#06x}: ", i);
+            }
+            let low = ('0'..='9')
+                .chain('a'..='f')
+                .nth((*b % 16) as usize)
+                .unwrap();
+            let high = ('0'..='9')
+                .chain('a'..='f')
+                .nth(((*b >> 4) % 16) as usize)
+                .unwrap();
+            print!("{}{} ", low, high);
+            if i % LINE_CHARS == LINE_CHARS - 1 {
+                print_ascii(
+                    &self.buf[i / LINE_CHARS * LINE_CHARS..(i / LINE_CHARS + 1) * LINE_CHARS],
+                );
+            }
+        }
+        if self.buf.len() % LINE_CHARS != 0 {
+            let prev_boundary = self.buf.len() / LINE_CHARS * LINE_CHARS;
+            let skipped = self.buf.len() - prev_boundary;
+            print!("{}", "   ".repeat(skipped));
+            print_ascii(&self.buf[prev_boundary..]);
+        }
+        println!("");
     }
 }
