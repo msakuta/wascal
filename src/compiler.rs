@@ -750,10 +750,9 @@ impl<'a> Compiler<'a> {
             }
         }
         if let Some(last_stmt) = stmts.last() {
-            if ty.word_count() < last_ty.word_count() {
-                for _ in 0..last_ty.word_count() - ty.word_count() {
-                    self.code.push(OpCode::Drop as u8);
-                }
+            println!("last_ty: {last_ty}");
+            for _ in 0..last_ty.word_count() {
+                self.code.push(OpCode::Drop as u8);
             }
             last_ty = self.emit_stmt(last_stmt, ty)?;
         }
