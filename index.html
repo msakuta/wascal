@@ -32,6 +32,8 @@
 let obj;
 let implib;
 
+const useModule = false;
+
 window.addEventListener("load", () => {
     const consoleElem = document.getElementById("console");
     let outputBuf = "";
@@ -54,7 +56,15 @@ window.addEventListener("load", () => {
     (async () => {
         console.log("Loading wasm");
         try {
-            implib = await import("./wascal.js");
+            if (!useModule) {
+                const wascal = await fetch("./wascal.js");
+                const wascalSrc = await wascal.text();
+                implib = eval(wascalSrc);
+            }
+            else {
+                implib = await import("./wascal.js");
+            }
+            implib.init(fetch("wascal.wasm"));
         }
         catch(e) {
             consoleElem.innerHTML = e;

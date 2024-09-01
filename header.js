@@ -1,4 +1,4 @@
-export let outputBuf = "";
+let outputBuf = "";
 
 const opts = {
     console: {
@@ -12,11 +12,11 @@ const opts = {
 };
 
 let obj;
-export let memory;
-(async () => {
-    obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"), opts);
+let memory;
+export async function init(wasm){
+    obj = await WebAssembly.instantiateStreaming(wasm, opts);
     memory = obj.instance.exports.memory;
-})();
+}
 
 function addStringToWasm(s) {
     if (!obj) return;

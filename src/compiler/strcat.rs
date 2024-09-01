@@ -13,29 +13,27 @@ impl<'a> Compiler<'a> {
         let set_ty = types.len();
         types.push(Compiler::type_strcat());
 
-        let mut compiler = Compiler::new(
-            vec![
-                VarDecl {
-                    name: "lhs".to_string(),
-                    ty: Type::I32.into(),
-                },
-                VarDecl {
-                    name: "rhs".to_string(),
-                    ty: Type::I32.into(),
-                },
-            ],
-            Type::Str,
-            types,
-            imports,
-            const_table,
-            funcs,
-        );
+        let args = vec![
+            VarDecl {
+                name: "lhs".to_string(),
+                ty: Type::Str.into(),
+            },
+            VarDecl {
+                name: "rhs".to_string(),
+                ty: Type::Str.into(),
+            },
+        ];
+        let num_args = args.len();
+
+        let mut compiler = Compiler::new(args, Type::Str, types, imports, const_table, funcs);
         compiler.codegen_strcat()?;
         compiler.code.push(OpCode::End as u8);
 
         let func = FuncDef {
             name: "strcat".to_string(),
             ty: set_ty,
+            ret_ty: Type::Str,
+            args: num_args,
             locals: compiler.locals,
             code: compiler.code,
             public: true,

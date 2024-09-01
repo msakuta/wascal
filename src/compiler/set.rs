@@ -13,29 +13,27 @@ impl<'a> Compiler<'a> {
         let set_ty = types.len();
         types.push(Compiler::type_set());
 
-        let mut compiler = Compiler::new(
-            vec![
-                VarDecl {
-                    name: "ptr".to_string(),
-                    ty: Type::I32.into(),
-                },
-                VarDecl {
-                    name: "char".to_string(),
-                    ty: Type::I32.into(),
-                },
-            ],
-            Type::Void,
-            types,
-            imports,
-            const_table,
-            funcs,
-        );
+        let args = vec![
+            VarDecl {
+                name: "ptr".to_string(),
+                ty: Type::I32.into(),
+            },
+            VarDecl {
+                name: "char".to_string(),
+                ty: Type::I32.into(),
+            },
+        ];
+        let num_args = args.len();
+
+        let mut compiler = Compiler::new(args, Type::Void, types, imports, const_table, funcs);
         compiler.codegen_set()?;
         compiler.code.push(OpCode::End as u8);
 
         let func = FuncDef {
             name: "set".to_string(),
             ty: set_ty,
+            ret_ty: Type::Void,
+            args: num_args,
             locals: compiler.locals,
             code: compiler.code,
             public: true,

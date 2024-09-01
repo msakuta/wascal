@@ -43,9 +43,11 @@ impl From<std::io::Error> for CompileError {
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
+/// `bind_module` indicates whether to use ES2015 module for binding JS code.
 pub fn compile_wasm(
     f: &mut impl Write,
     bind: &mut impl Write,
+    bind_module: bool,
     source: &str,
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
@@ -57,7 +59,6 @@ pub fn compile_wasm(
     f.write_all(&WASM_BINARY_VERSION)?;
 
     let (funcs, const_table) = codegen(
-        bind,
         source,
         types,
         imports,
@@ -65,6 +66,8 @@ pub fn compile_wasm(
         typeinf_f,
         debug_type_infer,
     )?;
+
+    write_bind(bind, bind_module, &funcs)?;
 
     write_section(f, WASM_TYPE_SECTION, &types_section(&types)?)?;
 
@@ -83,6 +86,77 @@ pub fn compile_wasm(
     Ok(())
 }
 
+/// Write a JS binding code, similar to wasm-bindgen does for Rust.
+/// `module` flag indicates whether the output JS code should be a ES2015 module or an IIFE.
+fn write_bind(bind: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io::Result<()> {
+    // Include boilerplate code for binding
+    const HEADER: &str = include_str!("../header.js");
+
+    if !module {
+        writeln!(bind, "(function(){{\nconst module = {{}};")?;
+        writeln!(
+            bind,
+            "{}",
+            HEADER.replace("export async function init", "module.init = async function")
+        )?;
+    } else {
+        writeln!(bind, "{}", HEADER)?;
+    }
+
+    for func in funcs {
+        let args = &func.locals[..func.args];
+        if func.public {
+            let js_args = args.iter().fold("".to_string(), |acc, cur| {
+                if acc.is_empty() {
+                    cur.name.clone()
+                } else {
+                    acc + ", " + &cur.name
+                }
+            });
+
+            let wasm_args = args.iter().fold("".to_string(), |acc, cur| {
+                let arg = if cur.ty == Type::Str.into() {
+                    format!("addStringToWasm({})", cur.name)
+                } else {
+                    format!("parseFloat({})", cur.name)
+                };
+                if acc.is_empty() {
+                    arg
+                } else {
+                    acc + ", " + &arg
+                }
+            });
+
+            let return_filter = if func.ret_ty == Type::Str {
+                "returnString"
+            } else {
+                ""
+            };
+
+            let fn_body = format!(
+                r#"({js_args}) {{
+    const ret = obj.instance.exports.{}({wasm_args});
+    return {return_filter}(ret);
+}}
+"#,
+                func.name
+            );
+
+            if module {
+                writeln!(bind, "export function {}{fn_body}", func.name)?;
+            } else {
+                writeln!(bind, "module.{} = function{fn_body}", func.name)?;
+            }
+        }
+    }
+
+    if !module {
+        writeln!(bind, "return module;\n}})()")?;
+    }
+
+    Ok(())
+}
+
 #[allow(dead_code)]
 pub fn disasm_wasm(
     f: &mut impl Write,
@@ -90,8 +164,7 @@ pub fn disasm_wasm(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
 ) -> CompileResult<()> {
-    let mut sink = std::io::sink();
-    let _ = codegen(&mut sink, source, types, imports, Some(f), None, false)?;
+    let _ = codegen(source, types, imports, Some(f), None, false)?;
     Ok(())
 }
 
@@ -102,13 +175,11 @@ pub fn typeinf_wasm(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
 ) -> CompileResult<()> {
-    let mut sink = std::io::sink();
-    let _ = codegen(&mut sink, source, types, imports, None, Some(f), false)?;
+    let _ = codegen(source, types, imports, None, Some(f), false)?;
     Ok(())
 }
 
 fn codegen(
-    bind: &mut impl Write,
     source: &str,
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
@@ -127,9 +198,6 @@ fn codegen(
     for func in &funcs {
         println!("  {}", func.name);
     }
-
-    // Include boilerplate code for binding
-    writeln!(bind, "{}", include_str!("../header.js"))?;
 
     let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
 
@@ -183,6 +251,8 @@ fn codegen(
         let func = FuncDef {
             name: func_stmt.name.to_string(),
             ty,
+            args: 0,
+            ret_ty,
             code: vec![],
             locals: vec![],
             public: func_stmt.public,
@@ -219,6 +289,7 @@ fn codegen(
         let locals = compiler.get_locals().to_vec();
 
         let func = &mut funcs[i + std_fns];
+        func.args = args.len();
         func.code = code;
         func.locals = locals;
 
@@ -226,44 +297,6 @@ fn codegen(
             let func_ty = &types[func.ty];
 
             disasm_func(&func, &func_ty, disasm_f)?;
-        }
-
-        if func.public {
-            let js_args = args.iter().fold("".to_string(), |acc, cur| {
-                if acc.is_empty() {
-                    cur.name.clone()
-                } else {
-                    acc + ", " + &cur.name
-                }
-            });
-
-            let wasm_args = args.iter().fold("".to_string(), |acc, cur| {
-                let arg = if cur.ty == Type::Str.into() {
-                    format!("addStringToWasm({})", cur.name)
-                } else {
-                    format!("parseFloat({})", cur.name)
-                };
-                if acc.is_empty() {
-                    arg
-                } else {
-                    acc + ", " + &arg
-                }
-            });
-
-            let return_filter = if ret_ty == Type::Str {
-                "returnString"
-            } else {
-                ""
-            };
-
-            writeln!(
-                bind,
-                r#"export function {}({js_args}) {{
-    const ret = obj.instance.exports.{}({wasm_args});
-    return {return_filter}(ret);
-}}"#,
-                func.name, func.name
-            )?;
         }
     }
 

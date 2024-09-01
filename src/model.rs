@@ -248,6 +248,8 @@ pub struct FuncImport {
 pub(crate) struct FuncDef {
     pub name: String,
     pub ty: usize,
+    pub args: usize,
+    pub ret_ty: Type,
     pub code: Vec<u8>,
     pub locals: Vec<VarDecl>,
     pub public: bool,

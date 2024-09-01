@@ -14,17 +14,13 @@ impl<'a> Compiler<'a> {
         let malloc_ty = types.len();
         types.push(Compiler::type_malloc());
 
-        let mut compiler = Compiler::new(
-            vec![VarDecl {
-                name: "len".to_string(),
-                ty: Type::I32.into(),
-            }],
-            Type::I32,
-            types,
-            imports,
-            const_table,
-            funcs,
-        );
+        let args = vec![VarDecl {
+            name: "len".to_string(),
+            ty: Type::I32.into(),
+        }];
+        let num_args = args.len();
+
+        let mut compiler = Compiler::new(args, Type::I32, types, imports, const_table, funcs);
         compiler.local_get(0);
         let ret = compiler.codegen_malloc()?;
         compiler.local_get(ret);
@@ -33,6 +29,8 @@ impl<'a> Compiler<'a> {
         let func = FuncDef {
             name: "malloc".to_string(),
             ty: malloc_ty,
+            ret_ty: Type::I32,
+            args: num_args,
             locals: compiler.locals,
             code: compiler.code,
             public: true,
