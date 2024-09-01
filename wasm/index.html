@@ -65,7 +65,7 @@
 
         <div class="justify">
             <h2>Data types</h2>
-            WebAssembly has only 4 primitive types.
+            WebAssembly has only 4 primitive types, but we have a custom type for strings.
             You can declare variables and function arguments in a syntax like <tt>a: type</tt>
             or <tt>let f(a: type) -> type</tt>.
             <tt>type</tt> can be one of:
@@ -74,16 +74,20 @@
                 <li>i64</li>
                 <li>f32</li>
                 <li>f64</li>
+                <li>str</li>
             </ul>
 
             <p>
-            Yes, there are no string types!
-            Since we do not use linear memory yet, we can't handle variable length data, including a string.
+            String type requires linear memory and a heap memory allocator.
+            We use a bump allocator that constantly leaks memory, so don't use too much memory.
             </p>
 
             <h2>Built-in functions</h2>
 
             <ul>
+            <li>malloc(size: i32) - Allocates heap memory block with the given size and return a pointer to it.</li>
+            <li>set(ptr: i32, c: i32) - Sets a memory byte at given address. A low level function that end users shouldn't use.</li>
+            <li>strcat(lhs: str, rhs: str) - Standard library function that is used to concatenate strings. Uses should use + operator between strings.</li>
             <li>log(value: i32) - Prints a value to JavaScript console (console.log).</li>
             <li>putc(char: i32) - Puts a single character, specified by ascii code, to the output console.</li>
             <li>set_fill_style(r: i32, g: i32, b: i32) - Sets fill color for painting on the canvas.</li>
