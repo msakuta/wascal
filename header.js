@@ -1,4 +1,4 @@
-let outputBuf = "";
+export let outputBuf = "";
 
 const opts = {
     console: {
