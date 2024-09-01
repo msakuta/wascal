@@ -36,7 +36,7 @@ function addStringToWasm(s) {
     lengthView[0] = encodedString.length;
     const view8 = new Uint8Array(obj.instance.exports.memory.buffer, top + 4, encodedString.length);
     view8.set(encodedString);
-    const newTop = top + Math.floor(encodedString.length + 3 / 4) * 4;
+    const newTop = top + 4 + Math.floor(encodedString.length + 3 / 4) * 4;
     view32[0] = newTop;
     return top;
 }

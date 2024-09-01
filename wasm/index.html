@@ -96,6 +96,36 @@
 
             <h2>Syntax</h2>
             The syntax is inspired a bit by functional languages, although the execution model is imperative.
+
+            <h3>Literals</h3>
+            <p>
+            Digits without a decimal points are abstract integers, which is either i32 or i64.
+            The concrete type will be determined by type inference.
+            Therefore, a integer literal without using will be an error with an ambiguous type.
+            </p>
+
+            <pre>
+42
+            </pre>
+
+            <p>
+            Digits with a decimal points are abstract floats, which is either f32 or f64.
+            The concrete type will be determined by type inference.
+            Therefore, a float literal without using will be an error with an ambiguous type.
+            </p>
+
+<pre>
+3.14
+</pre>
+
+            <p>
+            String literals are double quoted.
+            </p>
+
+<pre>
+"Hello"
+</pre>
+
             <h3>Variable declaration</h3>
             <p>
                 Variables are declared with <tt>let</tt> keyword like below.
