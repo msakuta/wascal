@@ -4,6 +4,7 @@ use crate::model::{Type, TypeSet};
 pub enum Expression<'src> {
     LiteralInt(i64, TypeSet),
     LiteralFloat(f64, TypeSet),
+    StrLiteral(String),
     Variable(&'src str),
     FnInvoke(&'src str, Vec<Expression<'src>>),
     Cast(Box<Expression<'src>>, Type),
@@ -84,6 +85,34 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
     } else {
         Err("Not a number".to_string())
     }
+}
+
+fn str_literal(i: &str) -> IResult<&str, Expression> {
+    let (r0, _) = recognize("\"")(space(i))?;
+    let mut r = r0;
+
+    let mut escaped = false;
+    let mut buf = String::new();
+    loop {
+        let Some(c) = peek_char(r) else {
+            return Err("Unclosed string".to_string());
+        };
+        r = advance_char(r);
+        if !escaped && c == '\"' {
+            break;
+        }
+        if (c == '\\') ^ !escaped {
+            buf.push(c);
+        }
+        escaped = c == '\\';
+    }
+
+    let val = &r0[..r.as_ptr() as usize - r0.as_ptr() as usize - 1];
+
+    Ok((
+        r,
+        Expression::StrLiteral(val.to_string().replace("\\\\", "\\").replace("\\n", "\n")),
+    ))
 }
 
 #[test]
@@ -204,6 +233,10 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     if let Ok((r, _)) = recognize("-")(r) {
         let (r, val) = factor(r)?;
         return Ok((r, Expression::Neg(Box::new(val))));
+    }
+
+    if let Ok((r, str)) = str_literal(r) {
+        return Ok((r, str));
     }
 
     if let Ok((r, _)) = recognize("(")(r) {
@@ -557,6 +590,7 @@ pub fn format_expr(
     match ex {
         Expression::LiteralFloat(num, ts) => write!(f, "{num}: {ts}"),
         Expression::LiteralInt(num, ts) => write!(f, "{num}: {ts}"),
+        Expression::StrLiteral(s) => write!(f, "\"{s}\""), // TODO: escape
         Expression::Variable(name) => write!(f, "{name}"),
         Expression::FnInvoke(fname, args) => {
             write!(f, "{fname}(")?;
@@ -653,12 +687,7 @@ pub fn format_stmt(
         Statement::FnDecl(func) => {
             let public = if func.public { "pub " } else { "" };
             write!(f, "{public}let {}(", func.name)?;
-            for (i, param) in func.params.iter().enumerate() {
-                write!(f, "{}: {}", param.name, param.ty)?;
-                if i != func.params.len() - 1 {
-                    write!(f, ", ")?;
-                }
-            }
+            format_params(&func.params, f)?;
             write!(f, ") -> {} =", func.ret_ty)?;
             for stmt in &func.stmts {
                 format_stmt(stmt, level + 1, f)?;
@@ -686,4 +715,14 @@ pub fn format_stmt(
             writeln!(f, ";")
         }
     }
+}
+
+pub fn format_params(params: &[VarDecl], f: &mut impl std::io::Write) -> std::io::Result<()> {
+    for (i, param) in params.iter().enumerate() {
+        write!(f, "{}: {}", param.name, param.ty)?;
+        if i != params.len() - 1 {
+            write!(f, ", ")?;
+        }
+    }
+    Ok(())
 }

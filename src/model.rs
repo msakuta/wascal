@@ -8,6 +8,7 @@ pub enum Type {
     F64,
     // Pseudo type representing no value
     Void,
+    Str,
 }
 
 impl Type {
@@ -18,6 +19,18 @@ impl Type {
             Self::F32 => 0x7d,
             Self::F64 => 0x7c,
             Self::Void => 0x40,
+            // Str is a compound type, but it is returned as an i32 pointing the buffer.
+            Self::Str => 0x7f,
+        }
+    }
+
+    /// Returns the number of words to represent this value.
+    /// Primitive types typically have a single word, while most variable-length type
+    /// has 2 words (a pointer and a size), and Void type has 0 words.
+    pub(crate) fn word_count(&self) -> usize {
+        match self {
+            Self::Str | Self::I32 | Self::I64 | Self::F32 | Self::F64 => 1,
+            Self::Void => 0,
         }
     }
 }
@@ -45,6 +58,7 @@ impl TryFrom<&str> for Type {
             "f32" => Type::F32,
             "f64" => Type::F64,
             "void" => Type::Void,
+            "str" => Type::Str,
             _ => return Err(format!("Unknown type {}", value)),
         })
     }
@@ -58,6 +72,7 @@ impl std::fmt::Display for Type {
             Self::F32 => write!(f, "f32"),
             Self::F64 => write!(f, "f64"),
             Self::Void => write!(f, "void"),
+            Self::Str => write!(f, "str"),
         }
     }
 }
@@ -69,6 +84,7 @@ pub struct TypeSet {
     pub f32: bool,
     pub f64: bool,
     pub void: bool,
+    pub st: bool,
 }
 
 impl TypeSet {
@@ -78,6 +94,7 @@ impl TypeSet {
         f32: false,
         f64: false,
         void: false,
+        st: false,
     };
     pub const I64: Self = Self {
         i32: false,
@@ -85,6 +102,7 @@ impl TypeSet {
         f32: false,
         f64: false,
         void: false,
+        st: false,
     };
     pub const F32: Self = Self {
         i32: false,
@@ -92,6 +110,7 @@ impl TypeSet {
         f32: true,
         f64: false,
         void: false,
+        st: false,
     };
     pub const F64: Self = Self {
         i32: false,
@@ -99,6 +118,23 @@ impl TypeSet {
         f32: false,
         f64: true,
         void: false,
+        st: false,
+    };
+    pub const VOID: Self = Self {
+        i32: false,
+        i64: false,
+        f32: false,
+        f64: false,
+        void: true,
+        st: false,
+    };
+    pub const STR: Self = Self {
+        i32: false,
+        i64: false,
+        f32: false,
+        f64: false,
+        void: false,
+        st: true,
     };
     pub const ALL: Self = Self {
         i32: true,
@@ -106,49 +142,21 @@ impl TypeSet {
         f32: true,
         f64: true,
         void: true,
+        st: true,
     };
 
     pub fn is_none(&self) -> bool {
-        !self.i32 && !self.i64 && !self.f32 && !self.f64
+        !self.i32 && !self.i64 && !self.f32 && !self.f64 && !self.st
     }
 
     pub fn determine(&self) -> Option<Type> {
         match self {
-            TypeSet {
-                i32: true,
-                i64: false,
-                f32: false,
-                f64: false,
-                void: false,
-            } => Some(Type::I32),
-            TypeSet {
-                i32: false,
-                i64: true,
-                f32: false,
-                f64: false,
-                void: false,
-            } => Some(Type::I64),
-            TypeSet {
-                i32: false,
-                i64: false,
-                f32: true,
-                f64: false,
-                void: false,
-            } => Some(Type::F32),
-            TypeSet {
-                i32: false,
-                i64: false,
-                f32: false,
-                f64: true,
-                void: false,
-            } => Some(Type::F64),
-            TypeSet {
-                i32: false,
-                i64: false,
-                f32: false,
-                f64: false,
-                void: true,
-            } => Some(Type::Void),
+            &Self::I32 => Some(Type::I32),
+            &Self::I64 => Some(Type::I64),
+            &Self::F32 => Some(Type::F32),
+            &Self::F64 => Some(Type::F64),
+            &Self::VOID => Some(Type::Void),
+            &Self::STR => Some(Type::Str),
             _ => None,
         }
     }
@@ -163,6 +171,7 @@ impl std::ops::BitOr for TypeSet {
             f32: self.f32 | rhs.f32,
             f64: self.f64 | rhs.f64,
             void: self.void | rhs.void,
+            st: self.st | rhs.st,
         }
     }
 }
@@ -176,6 +185,7 @@ impl std::ops::BitAnd for TypeSet {
             f32: self.f32 & rhs.f32,
             f64: self.f64 & rhs.f64,
             void: self.void & rhs.void,
+            st: self.st & rhs.st,
         }
     }
 }
@@ -189,6 +199,7 @@ impl From<Type> for TypeSet {
             Type::F32 => ret.f32 = true,
             Type::F64 => ret.f64 = true,
             Type::Void => ret.void = true,
+            Type::Str => ret.st = true,
         }
         ret
     }
@@ -196,39 +207,26 @@ impl From<Type> for TypeSet {
 
 impl std::fmt::Display for TypeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.i32 & self.i64 & self.f32 & self.f64 & self.void & self.st {
+            return write!(f, "any");
+        }
         let mut written = false;
-        if self.i32 {
-            write!(f, "i32")?;
-            written = true;
-        }
-        if self.i64 {
-            if written {
-                write!(f, "|")?;
+        let mut write_ty = |val, name| {
+            if val {
+                if written {
+                    write!(f, "|")?;
+                }
+                write!(f, "{name}")?;
+                written = true;
             }
-            write!(f, "i64")?;
-            written = true;
-        }
-        if self.f32 {
-            if written {
-                write!(f, "|")?;
-            }
-            write!(f, "f32")?;
-            written = true;
-        }
-        if self.f64 {
-            if written {
-                write!(f, "|")?;
-            }
-            write!(f, "f64")?;
-            written = true;
-        }
-        if self.void {
-            if written {
-                write!(f, "|")?;
-            }
-            write!(f, "void")?;
-            written = true;
-        }
+            Ok(())
+        };
+        write_ty(self.i32, "i32")?;
+        write_ty(self.i64, "i64")?;
+        write_ty(self.f32, "f32")?;
+        write_ty(self.f64, "f64")?;
+        write_ty(self.void, "void")?;
+        write_ty(self.st, "str")?;
         if !written {
             write!(f, "(none)")?;
         }
@@ -250,6 +248,9 @@ pub struct FuncImport {
 pub(crate) struct FuncDef {
     pub name: String,
     pub ty: usize,
+    /// The number of arguments as first n locals
+    pub args: usize,
+    pub ret_ty: Type,
     pub code: Vec<u8>,
     pub locals: Vec<VarDecl>,
     pub public: bool,

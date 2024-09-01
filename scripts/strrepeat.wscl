@@ -1,0 +1,7 @@
+pub let strrepeat(s: str, num: i32) -> str = {
+    let ret = s;
+    for i in 1 to num {
+        ret = ret + s;
+    }
+    ret
+}

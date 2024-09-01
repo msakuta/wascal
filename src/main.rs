@@ -1,4 +1,5 @@
 mod compiler;
+mod const_table;
 mod infer;
 mod model;
 mod parser;
@@ -11,12 +12,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut f = std::io::BufWriter::new(std::fs::File::create("wascal.wasm")?);
 
     let mut file_name = "scripts/hello.wscl".to_string();
+    let mut bind_f = std::io::BufWriter::new(std::fs::File::create("wascal.js")?);
     let mut debug_type_infer = false;
     let mut enable_disasm = false;
+    let mut bind_module = false;
     for arg in std::env::args().skip(1) {
         match &arg as &str {
             "-d" => debug_type_infer = true,
             "-D" => enable_disasm = true,
+            "-m" => bind_module = true,
             _ => file_name = arg,
         }
     }
@@ -48,6 +52,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     compile_wasm(
         &mut f,
+        &mut bind_f,
+        bind_module,
         &source,
         &mut types,
         &imports,

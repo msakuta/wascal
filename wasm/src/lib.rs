@@ -1,8 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use wascal::{
-    compile_wasm, disasm_wasm, typeinf_wasm, FuncImport, FuncType, Type,
-};
+use wascal::{compile_wasm, disasm_wasm, typeinf_wasm, FuncImport, FuncType, Type};
 
 #[wasm_bindgen]
 pub fn parse_ast(source: &str) -> Result<String, JsValue> {
@@ -14,12 +12,26 @@ pub fn parse_ast(source: &str) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn compile(source: &str) -> Result<Vec<u8>, JsValue> {
+pub fn compile(source: &str) -> Result<JsValue, JsValue> {
     let (mut types, imports) = default_imports();
-    let mut buf = vec![];
-    compile_wasm(&mut buf, source, &mut types, &imports, None, None, false)
-        .map_err(|e| JsValue::from(format!("{e}")))?;
-    Ok(buf)
+    let mut wasm_buf = vec![];
+    let mut bind_buf = vec![];
+    compile_wasm(
+        &mut wasm_buf,
+        &mut bind_buf,
+        false,
+        source,
+        &mut types,
+        &imports,
+        None,
+        None,
+        false,
+    )
+    .map_err(|e| JsValue::from(format!("{e}")))?;
+    let bind_str = String::from_utf8(bind_buf).map_err(|e| JsValue::from(format!("{e}")))?;
+    let ret =
+        JsValue::from(Box::new([JsValue::from(wasm_buf), JsValue::from(bind_str)]) as Box<[_]>);
+    Ok(ret)
 }
 
 #[wasm_bindgen]

@@ -3,7 +3,7 @@
 use std::{collections::HashMap, io::Write};
 
 use crate::{
-    model::TypeSet,
+    model::{FuncDef, TypeSet},
     parser::{format_stmt, Expression, Statement},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
@@ -42,6 +42,10 @@ fn get_type_infer_fns(
 ) -> Result<(), String> {
     match stmt {
         Statement::FnDecl(fn_decl) => {
+            let mut buf = vec![];
+            format_stmt(stmt, 0, &mut buf).map_err(|e| e.to_string())?;
+            let ast_str = String::from_utf8(buf).map_err(|e| e.to_string())?;
+            println!("before infer: {}", ast_str);
             funcs.insert(
                 fn_decl.name.to_string(),
                 TypeInferFn {
@@ -78,14 +82,17 @@ impl<'a> TypeInferer<'a> {
         match ex {
             Expression::LiteralInt(_, ts) => Ok(*ts),
             Expression::LiteralFloat(_, ts) => Ok(*ts),
+            Expression::StrLiteral(_) => Ok(Type::Str.into()),
             Expression::Variable(name) => Ok(self
                 .locals
                 .get(*name)
                 .copied()
                 .unwrap_or(TypeSet::default())),
-            Expression::FnInvoke(name, _) => {
-                Ok(self.funcs.get(*name).map_or(TypeSet::ALL, |f| f.ret_ty))
-            }
+            Expression::FnInvoke(name, _) => self
+                .funcs
+                .get(*name)
+                .map(|f| f.ret_ty)
+                .ok_or_else(|| format!("Function {name} not found")),
             Expression::Cast(_ex, ty) => Ok((*ty).into()),
             Expression::Neg(ex) => self.forward_type_expr(ex),
             Expression::Add(lhs, rhs)
@@ -118,6 +125,7 @@ impl<'a> TypeInferer<'a> {
         match ex {
             Expression::LiteralInt(_, target_ts) => *target_ts = *ts,
             Expression::LiteralFloat(_, target_ts) => *target_ts = *ts,
+            Expression::StrLiteral(_) => {}
             Expression::Variable(name) => {
                 if let Some(var) = self.locals.get_mut(*name) {
                     dprintln!("propagate variable {name}: {var} -> {ts}");
@@ -357,6 +365,7 @@ pub fn run_type_infer(
     stmts: &mut [Statement],
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
+    funcs: &[FuncDef],
     typeinf_f: Option<&mut dyn Write>,
 ) -> CompileResult<()> {
     let mut type_infer_funcs = HashMap::new();
@@ -370,6 +379,19 @@ pub fn run_type_infer(
                     .results
                     .get(0)
                     .map_or(TypeSet::default(), |v| (*v).into()),
+            },
+        );
+    }
+    for func in funcs {
+        let func_ty = &types[func.ty];
+        type_infer_funcs.insert(
+            func.name.clone(),
+            TypeInferFn {
+                params: func_ty.params.clone(),
+                ret_ty: func_ty
+                    .results
+                    .get(0)
+                    .map_or(TypeSet::VOID, |f| (*f).into()),
             },
         );
     }

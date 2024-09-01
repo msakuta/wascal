@@ -30,6 +30,9 @@
         <script>
 
 let obj;
+let implib;
+
+const useModule = false;
 
 window.addEventListener("load", () => {
     const consoleElem = document.getElementById("console");
@@ -47,16 +50,33 @@ window.addEventListener("load", () => {
         }
     };
 
-    const load = document.getElementById("load");
-    load.addEventListener("click", async () => {
+    const load = document.getElementById("reload");
+    load.addEventListener("click", () => location.reload());
+
+    (async () => {
         console.log("Loading wasm");
-        obj = await WebAssembly.instantiateStreaming(fetch("wascal.wasm"), opts);
+        try {
+            if (!useModule) {
+                const wascal = await fetch("./wascal.js");
+                const wascalSrc = await wascal.text();
+                implib = eval(wascalSrc);
+            }
+            else {
+                implib = await import("./wascal.js");
+            }
+            implib.init(fetch("wascal.wasm"));
+        }
+        catch(e) {
+            consoleElem.innerHTML = e;
+        }
 
         const functions = document.getElementById("functions");
         while (functions.firstChild) functions.removeChild(functions.firstChild);
         functionElems = [];
-        for (let expName in obj.instance.exports) {
-            const expFunc = obj.instance.exports[expName];
+        for (let expName in implib) {
+            if (0 <= ["init", "malloc", "set", "strcat"].indexOf(expName)) continue;
+            const expFunc = implib[expName];
+            if (typeof expFunc !== "function") continue;
             const funcElem = document.createElement("div");
             const fNameElem = document.createTextNode(expName + "(");
             funcElem.appendChild(fNameElem);
@@ -85,22 +105,25 @@ window.addEventListener("load", () => {
             functions.appendChild(funcElem);
             functionElems[expName] = argElems;
         }
-    });
-    
+    })();
+
     const callFunc = expName => async () => {
-        const expFunc = obj.instance.exports[expName];
+        const expFunc = implib[expName];
         console.log("Calling wasm");
-        const argElems = functionElems[expName];
-        let args = [];
-        for (let i = 0; i < expFunc.length; i++) {
-            const x = parseFloat(argElems[i].value);
-            args.push(x);
-        }
-        const output = document.getElementById('output');
+        let outputBuf = "";
         const start = performance.now();
-        outputBuf = "";
         try{
-            output.innerHTML = expFunc.apply(this, args);
+            const argElems = functionElems[expName];
+            let args = [];
+            for (let i = 0; i < expFunc.length; i++) {
+                const x = argElems[i].value;
+                args.push(x);
+            }
+            implib.outputBuf = "";
+            const output = document.getElementById('output');
+            const res = expFunc.apply(this, args);
+            output.innerHTML = res;
+            outputBuf = implib.outputBuf;
         }
         catch(e){
             outputBuf = e;
@@ -115,7 +138,7 @@ window.addEventListener("load", () => {
     </head>
     <body>
         <h1>Wascal</h1>
-        <button id="load">Load wasm module</button>
+        <button id="reload">Reload wasm module</button>
         <div class="border">
             <h2>Function List</h2>
             <div id="functions" class="leftAlign"></div>
