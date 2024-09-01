@@ -13,8 +13,16 @@ const opts = {
 
 let obj;
 let memory;
-export async function init(wasm){
-    obj = await WebAssembly.instantiateStreaming(wasm, opts);
+export async function init(wasm, moreOpts = {}){
+    for (const key in moreOpts) {
+        opts[key] = moreOpts[key];
+    }
+    if (wasm instanceof Promise) {
+        obj = await WebAssembly.instantiateStreaming(wasm, opts);
+    }
+    else {
+        obj = await WebAssembly.instantiate(wasm, opts);
+    }
     memory = obj.instance.exports.memory;
 }
 

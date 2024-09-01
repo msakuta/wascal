@@ -43,7 +43,7 @@ impl From<std::io::Error> for CompileError {
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
-/// `bind_module` indicates whether to use ES2015 module for binding JS code.
+/// `bind_module` indicates whether to use ES6 module for binding JS code.
 pub fn compile_wasm(
     f: &mut impl Write,
     bind: &mut impl Write,
@@ -87,7 +87,7 @@ pub fn compile_wasm(
 }
 
 /// Write a JS binding code, similar to wasm-bindgen does for Rust.
-/// `module` flag indicates whether the output JS code should be a ES2015 module or an IIFE.
+/// `module` flag indicates whether the output JS code should be a ES6 module or an IIFE.
 fn write_bind(bind: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io::Result<()> {
     // Include boilerplate code for binding
     const HEADER: &str = include_str!("../header.js");

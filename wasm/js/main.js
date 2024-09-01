@@ -24,14 +24,13 @@ async function runCommon(process) {
     document.getElementById("timeMessage").innerHTML = `Execution time: ${(end - start).toFixed(1)} ms (See <a href="#Time">notes</a>)`;
 }
 
-async function callFunc(obj, expName) {
-    const expFunc = obj.instance.exports[expName];
+async function callFunc(bind, expName) {
+    const expFunc = bind[expName];
     console.log("Calling wasm");
     const argElems = functionElems[expName];
     let args = [];
     for (let i = 0; i < expFunc.length; i++) {
-        const x = parseFloat(argElems[i].value);
-        args.push(x);
+        args.push(argElems[i].value);
     }
     let result;
     const start = performance.now();
@@ -80,16 +79,20 @@ document.getElementById("parseAst").addEventListener("click", () => runCommon(so
     document.getElementById("console").value = result;
 }));
 document.getElementById("compile").addEventListener("click", () => runCommon(async source => {
-    const wasm = compile(source);
+    const [wasm, bindStr] = compile(source);
+    const bind = eval(bindStr);
+    bind.init(wasm, opts);
     consoleElem.value = `Compiled WebAssembly module in ${wasm.length} bytes.`;
-
-    const obj = await WebAssembly.instantiate(wasm, opts);
 
     const functions = document.getElementById("functions");
     while (functions.firstChild) functions.removeChild(functions.firstChild);
     functionElems = [];
-    for (let expName in obj.instance.exports) {
-        const expFunc = obj.instance.exports[expName];
+    console.log(`bind: ${Object.getOwnPropertyNames(bind)}`);
+    for (const expName in bind) {
+        // Skip useless functions from UI
+        if (0 <= ["init", "malloc", "set", "strcat"].indexOf(expName)) continue;
+        const expFunc = bind[expName];
+        if (typeof expFunc !== "function") continue;
         const funcElem = document.createElement("div");
         const fNameElem = document.createTextNode(expName + "(");
         funcElem.appendChild(fNameElem);
@@ -112,7 +115,7 @@ document.getElementById("compile").addEventListener("click", () => runCommon(asy
 
         const callButton = document.createElement("button");
         callButton.innerHTML = "Call";
-        callButton.addEventListener("click", () => callFunc(obj, expName));
+        callButton.addEventListener("click", () => callFunc(bind, expName));
         funcElem.appendChild(callButton);
 
         functions.appendChild(funcElem);
@@ -138,6 +141,7 @@ const samples = document.getElementById("samples");
 [
     "hello.wscl", "fact.wscl", "fibo.wscl", "float.wscl",
     "funcs.wscl", "log.wscl", "loop.wscl",
+    "string.wscl", "strrepeat.wscl",
     "mandel.wscl",
     "canvas.wscl", "mandel_canvas.wscl",
 ]

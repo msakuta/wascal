@@ -248,6 +248,7 @@ pub struct FuncImport {
 pub(crate) struct FuncDef {
     pub name: String,
     pub ty: usize,
+    /// The number of arguments as first n locals
     pub args: usize,
     pub ret_ty: Type,
     pub code: Vec<u8>,
