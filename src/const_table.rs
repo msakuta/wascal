@@ -74,14 +74,8 @@ impl ConstTable {
             if i % LINE_CHARS == 0 {
                 write!(f, "\n{:#06x}: ", i)?;
             }
-            let low = ('0'..='9')
-                .chain('a'..='f')
-                .nth((*b % 16) as usize)
-                .unwrap();
-            let high = ('0'..='9')
-                .chain('a'..='f')
-                .nth(((*b >> 4) % 16) as usize)
-                .unwrap();
+            let low = char::from_digit((*b % 16) as u32, 16).unwrap_or('0');
+            let high = char::from_digit(((*b >> 4) % 16) as u32, 16).unwrap_or('0');
             write!(f, "{}{} ", high, low)?;
             if i % LINE_CHARS == LINE_CHARS - 1 {
                 print_ascii(
