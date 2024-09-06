@@ -31,6 +31,7 @@ pub enum Statement<'src> {
     For(For<'src>),
     Brace(Vec<Statement<'src>>),
     Return(Option<Expression<'src>>),
+    Struct(StructDef<'src>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -57,6 +58,18 @@ pub struct For<'src> {
     pub(crate) start: Expression<'src>,
     pub(crate) end: Expression<'src>,
     pub(crate) stmts: Vec<Statement<'src>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField<'src> {
+    pub(crate) name: &'src str,
+    pub(crate) ty: Type,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct StructDef<'src> {
+    name: &'src str,
+    fields: Vec<StructField<'src>>,
 }
 
 type IResult<R, T> = Result<(R, T), String>;
@@ -513,6 +526,45 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
     return Ok((r, Statement::VarDecl(name, ty, ex)));
 }
 
+/// The difference from [`fn_param`] is that the type is not optional.
+fn struct_field(i: &str) -> IResult<&str, StructField> {
+    let (r, field_name) = identifier(space(i))?;
+    dbg!(field_name);
+    let (r, ty) = decl_ty(space(r))?;
+    Ok((
+        r,
+        StructField {
+            name: field_name,
+            ty,
+        },
+    ))
+}
+
+fn struct_def(i: &str) -> IResult<&str, Statement> {
+    let (r, "struct") = identifier(space(i))? else {
+        return Err("Ident `struct` expected".to_string());
+    };
+
+    let (r, name) = identifier(space(r))?;
+
+    dbg!(name);
+
+    let (mut r, _) = recognize("{")(space(r))?;
+
+    let mut fields = vec![];
+    while let Ok((next_r, field)) = struct_field(r) {
+        fields.push(field);
+        let Ok((next_r, _)) = recognize(",")(space(next_r)) else {
+            break;
+        };
+        r = next_r;
+    }
+
+    let (r, _) = recognize("}")(space(r))?;
+
+    Ok((r, Statement::Struct(StructDef { name, fields })))
+}
+
 fn statement(i: &str) -> Result<(&str, Statement), String> {
     let r = space(i);
 
@@ -528,6 +580,10 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
         let (r, ex) = expression(r).map_or((r, None), |(r, ex)| (r, Some(ex)));
         let (r, _) = recognize(";")(space(r)).unwrap_or((r, ""));
         return Ok((r, Statement::Return(ex)));
+    }
+
+    if let Ok((r, stdef)) = struct_def(space(r)) {
+        return Ok((r, stdef));
     }
 
     if let Ok(res) = let_binding(r) {
@@ -713,6 +769,13 @@ pub fn format_stmt(
                 format_expr(ex, level, f)?;
             }
             writeln!(f, ";")
+        }
+        Statement::Struct(stdef) => {
+            writeln!(f, "{indent}struct {} {{", stdef.name)?;
+            for field in &stdef.fields {
+                writeln!(f, "{indent}  {}: {},", field.name, field.ty)?;
+            }
+            writeln!(f, "{indent}}}")
         }
     }
 }

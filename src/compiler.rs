@@ -736,6 +736,7 @@ impl<'a> Compiler<'a> {
                 self.code.push(OpCode::Return as u8);
                 Ok(Type::Void)
             }
+            Statement::Struct(_) => Ok(Type::Void),
         }
     }
 

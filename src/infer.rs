@@ -227,6 +227,7 @@ impl<'a> TypeInferer<'a> {
                     self.propagate_type_expr(ex, &ret_ty)?;
                 }
             }
+            Statement::Struct(_) => {}
         }
         Ok(())
     }
