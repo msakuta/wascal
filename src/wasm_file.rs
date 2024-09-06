@@ -4,10 +4,10 @@ use crate::{
     const_table::ConstTable,
     infer::{run_type_infer, set_infer_debug},
     model::{FuncDef, FuncImport, FuncType},
-    parser::{parse, FnDecl, Statement},
+    parser::{parse, FnDecl, Statement, StructDef},
     Type,
 };
-use std::{error::Error, io::Write};
+use std::{collections::HashMap, error::Error, io::Write};
 
 const WASM_BINARY_VERSION: [u8; 4] = [1, 0, 0, 0];
 const WASM_TYPE_SECTION: u8 = 1;
@@ -213,9 +213,11 @@ fn codegen(
 
     let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
 
+    let structs = get_structs(&stmts)?;
+
     set_infer_debug(debug_type_infer);
 
-    run_type_infer(&mut stmts, types, imports, &funcs, typeinf_f)?;
+    run_type_infer(&mut stmts, types, imports, &funcs, &structs, typeinf_f)?;
 
     fn find_funcs<'a>(stmts: &'a [Statement<'a>], funcs: &mut Vec<&FnDecl<'a>>) {
         for stmt in stmts.iter() {
@@ -289,6 +291,7 @@ fn codegen(
             &imports,
             &mut const_table,
             &mut funcs,
+            &structs,
         );
         if let Err(e) = compiler.compile(&func_stmt.stmts, ret_ty) {
             return Err(CompileError::Compile(format!(
@@ -315,6 +318,32 @@ fn codegen(
     const_table.finish();
 
     Ok((funcs, const_table))
+}
+
+fn get_structs<'src>(stmts: &[Statement<'src>]) -> CompileResult<HashMap<String, StructDef<'src>>> {
+    let mut structs = HashMap::new();
+
+    fn find_structs<'a, 'src: 'a>(
+        stmts: &'a [Statement<'src>],
+        structs: &mut HashMap<String, StructDef<'src>>,
+    ) {
+        for stmt in stmts {
+            match stmt {
+                Statement::Struct(stdef) => {
+                    structs.insert(stdef.name.to_string(), stdef.clone());
+                }
+                Statement::Brace(stmts) => find_structs(stmts, structs),
+                Statement::FnDecl(fn_decl) => find_structs(&fn_decl.stmts, structs),
+                _ => {}
+            }
+        }
+    }
+
+    find_structs(stmts, &mut structs);
+
+    dbg!(&structs);
+
+    Ok(structs)
 }
 
 fn compile_std_lib(

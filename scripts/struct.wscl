@@ -4,4 +4,4 @@ struct Hey {
     last: str,
 }
 
-pub let format(s: Hey) -> str = "s.first + s.last";
+pub let format(s: Hey) -> str = s.first + s.last;

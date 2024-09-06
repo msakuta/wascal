@@ -4,7 +4,7 @@ use std::{collections::HashMap, io::Write};
 
 use crate::{
     model::{FuncDef, TypeSet},
-    parser::{format_stmt, Expression, Statement},
+    parser::{format_stmt, Expression, Statement, StructDef},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
 };
@@ -67,14 +67,20 @@ struct TypeInferer<'a> {
     ret_ty: TypeSet,
     funcs: &'a HashMap<String, TypeInferFn>,
     locals: HashMap<String, TypeSet>,
+    structs: &'a HashMap<String, StructDef<'a>>,
 }
 
 impl<'a> TypeInferer<'a> {
-    pub fn new(ret_ty: TypeSet, funcs: &'a HashMap<String, TypeInferFn>) -> Self {
+    pub fn new(
+        ret_ty: TypeSet,
+        funcs: &'a HashMap<String, TypeInferFn>,
+        structs: &'a HashMap<String, StructDef<'a>>,
+    ) -> Self {
         Self {
             ret_ty,
             funcs,
             locals: HashMap::new(),
+            structs,
         }
     }
 
@@ -94,6 +100,26 @@ impl<'a> TypeInferer<'a> {
                 .map(|f| f.ret_ty.clone())
                 .ok_or_else(|| format!("Function {name} not found")),
             Expression::Cast(_ex, ty) => Ok(ty.clone().into()),
+            Expression::FieldAccess(ex, fname) => {
+                let prefix_ty = self
+                    .forward_type_expr(ex)?
+                    .determine()
+                    .ok_or_else(|| "Struct could not be determined".to_string())?;
+                if let Type::Struct(stname) = prefix_ty {
+                    let Some(stdef) = self.structs.get(&stname) else {
+                        return Err(format!("Struct {stname} not defined"));
+                    };
+
+                    let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname)
+                    else {
+                        return Err(format!("Struct field {fname} not found"));
+                    };
+
+                    Ok(stfield.ty.clone().into())
+                } else {
+                    Err("Field access operator (.) is applied to a non-struct".to_string())
+                }
+            }
             Expression::Neg(ex) => self.forward_type_expr(ex),
             Expression::Add(lhs, rhs)
             | Expression::Sub(lhs, rhs)
@@ -148,6 +174,9 @@ impl<'a> TypeInferer<'a> {
             }
             Expression::Cast(_ex, _ty) => {
                 // Cast will not propagate type constraints
+            }
+            Expression::FieldAccess(_ex, _ty) => {
+                // Field access will not propagate type constraints because struct types should be determinate
             }
             Expression::Neg(ex) => {
                 self.propagate_type_expr(ex, ts)?;
@@ -305,7 +334,8 @@ impl<'a> TypeInferer<'a> {
             }
             Statement::FnDecl(fn_decl) => {
                 dprintln!("Start type inference on fn {}", fn_decl.name);
-                let mut inferer = TypeInferer::new(fn_decl.ret_ty.clone(), self.funcs);
+                let mut inferer =
+                    TypeInferer::new(fn_decl.ret_ty.clone(), self.funcs, self.structs);
                 inferer.locals = fn_decl
                     .params
                     .iter()
@@ -367,11 +397,12 @@ impl<'a> TypeInferer<'a> {
 /// Run type inference engine. Since it modifies the type declaration in the AST,
 /// `stmts` needs to be a mutable reference, but it won't add or remove statements, so it doesn't
 /// have to be a `&mut Vec<Statement>`.
-pub fn run_type_infer(
+pub fn run_type_infer<'src>(
     stmts: &mut [Statement],
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
     funcs: &[FuncDef],
+    structs: &HashMap<String, StructDef<'src>>,
     typeinf_f: Option<&mut dyn Write>,
 ) -> CompileResult<()> {
     let mut type_infer_funcs = HashMap::new();
@@ -407,7 +438,7 @@ pub fn run_type_infer(
 
     for (i, stmt) in stmts.iter_mut().enumerate() {
         dprintln!("type inferring toplevel statement {i}");
-        let mut inferer = TypeInferer::new(TypeSet::default(), &type_infer_funcs);
+        let mut inferer = TypeInferer::new(TypeSet::default(), &type_infer_funcs, structs);
         inferer
             .infer_type_stmt(stmt)
             .map_err(|e| CompileError::Compile(e))?;

@@ -8,6 +8,7 @@ pub enum Expression<'src> {
     Variable(&'src str),
     FnInvoke(&'src str, Vec<Expression<'src>>),
     Cast(Box<Expression<'src>>, Type),
+    FieldAccess(Box<Expression<'src>>, &'src str),
     Neg(Box<Expression<'src>>),
     Add(Box<Expression<'src>>, Box<Expression<'src>>),
     Sub(Box<Expression<'src>>, Box<Expression<'src>>),
@@ -66,10 +67,10 @@ pub struct StructField<'src> {
     pub(crate) ty: Type,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StructDef<'src> {
-    name: &'src str,
-    fields: Vec<StructField<'src>>,
+    pub(crate) name: &'src str,
+    pub(crate) fields: Vec<StructField<'src>>,
 }
 
 type IResult<R, T> = Result<(R, T), String>;
@@ -227,10 +228,26 @@ fn test_fn_call() {
     );
 }
 
-fn postfix_as<'a>(expr: Expression<'a>, i: &'a str) -> IResult<&'a str, Expression<'a>> {
-    if let Ok((r, _)) = space1(i).and_then(|r| recognize("as")(r)) {
-        let (r, ty) = identifier(space1(r)?)?;
-        return Ok((r, Expression::Cast(Box::new(expr), Type::try_from(ty)?)));
+fn postfix_as<'a>(i: &'a str) -> IResult<&'a str, Type> {
+    let (r, _) = space1(i).and_then(|r| recognize("as")(r))?;
+    let (r, ty) = identifier(space1(r)?)?;
+    Ok((r, Type::try_from(ty)?))
+}
+
+fn postfix_dot<'a>(i: &'a str) -> IResult<&'a str, &'a str> {
+    let (r, _) = recognize(".")(space(i))?;
+    dbg!(r);
+    let (r, field) = identifier(space(r))?;
+    Ok((r, field))
+}
+
+fn postfix_expr<'a>(expr: Expression<'a>, i: &'a str) -> IResult<&'a str, Expression<'a>> {
+    if let Ok((r, p_as)) = postfix_as(i) {
+        return Ok((r, Expression::Cast(Box::new(expr), p_as)));
+    }
+
+    if let Ok((r, p_dot)) = postfix_dot(i) {
+        return Ok((r, Expression::FieldAccess(Box::new(expr), p_dot)));
     }
 
     Ok((i, expr))
@@ -255,7 +272,7 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     if let Ok((r, _)) = recognize("(")(r) {
         let (r, ex) = expression(r)?;
         let (r, _) = recognize(")")(r)?;
-        return postfix_as(ex, r);
+        return postfix_expr(ex, r);
     }
 
     let Ok((r, name)) = identifier(r) else {
@@ -263,10 +280,10 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     };
 
     if let Ok((r, ex)) = fn_call(name, r) {
-        return postfix_as(ex, r);
+        return postfix_expr(ex, r);
     }
 
-    postfix_as(Expression::Variable(name), r)
+    postfix_expr(Expression::Variable(name), r)
 }
 
 fn mul(i: &str) -> Result<(&str, Expression), String> {
@@ -663,6 +680,11 @@ pub fn format_expr(
         Expression::Cast(ex, ty) => {
             format_expr(ex, level, f)?;
             write!(f, " as {ty}")?;
+            Ok(())
+        }
+        Expression::FieldAccess(ex, field) => {
+            format_expr(ex, level, f)?;
+            write!(f, ".{field}")?;
             Ok(())
         }
         Expression::Neg(ex) => {

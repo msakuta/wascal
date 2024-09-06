@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, collections::HashSet};
+use std::collections::HashSet;
 
 use crate::parser::VarDecl;
 

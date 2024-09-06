@@ -2,12 +2,15 @@ mod malloc;
 mod set;
 mod strcat;
 
-use std::io::{Read, Write};
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+};
 
 use crate::{
     const_table::ConstTable,
     model::{FuncDef, FuncImport, FuncType, Type},
-    parser::{Expression, For, Statement, VarDecl},
+    parser::{Expression, For, Statement, StructDef, VarDecl},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -25,6 +28,9 @@ pub(crate) enum OpCode {
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Load = 0x28,
+    I64Load = 0x29,
+    F32Load = 0x2a,
+    F64Load = 0x2b,
     I32Load8S = 0x2c,
     I32Store = 0x36,
     I32Store8 = 0x3a,
@@ -119,6 +125,9 @@ impl_op_from!(
     Return: "return", Call: "call", Drop: "drop",
     LocalGet: "local.get", LocalSet: "local.set",
     I32Load: "i32.load",
+    I64Load: "i64.load",
+    F32Load: "f32.load",
+    F64Load: "f64.load",
     I32Load8S: "i32.load8_s",
     I32Store: "i32.store",
     I32Store8: "i32.store8",
@@ -202,6 +211,7 @@ pub struct Compiler<'a> {
     const_table: &'a mut ConstTable,
     /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
+    structs: &'a HashMap<String, StructDef<'a>>,
 }
 
 impl<'a> Compiler<'a> {
@@ -212,6 +222,7 @@ impl<'a> Compiler<'a> {
         imports: &'a [FuncImport],
         const_table: &'a mut ConstTable,
         funcs: &'a mut Vec<FuncDef>,
+        structs: &'a HashMap<String, StructDef<'a>>,
     ) -> Self {
         let locals = args;
         Self {
@@ -222,6 +233,7 @@ impl<'a> Compiler<'a> {
             imports,
             const_table,
             funcs,
+            structs,
         }
     }
 
@@ -467,6 +479,33 @@ impl<'a> Compiler<'a> {
                 let ex_ty = self.emit_expr(ex)?;
                 self.coerce_type(ty, &ex_ty)?;
                 Ok(ty.clone())
+            }
+            Expression::FieldAccess(ex, fname) => {
+                let ex_ty = self.emit_expr(ex)?;
+                let Type::Struct(stname) = ex_ty else {
+                    return Err("Field access operator applied to non-struct".to_string());
+                };
+                let Some(stdef) = self.structs.get(&stname) else {
+                    return Err(format!("Struct {stname} not found"));
+                };
+                let Some((idx, stfield)) = stdef
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, field)| &field.name == fname)
+                else {
+                    return Err(format!("Struct field {fname} not found"));
+                };
+                self.code.push(match stfield.ty {
+                    Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Load,
+                    Type::I64 => OpCode::I64Load,
+                    Type::F32 => OpCode::F32Load,
+                    Type::F64 => OpCode::F64Load,
+                    Type::Void => return Ok(Type::Void),
+                } as u8);
+                encode_leb128(&mut self.code, 0).unwrap();
+                encode_leb128(&mut self.code, (idx * std::mem::size_of::<u32>()) as u32).unwrap();
+                Ok(stfield.ty.clone())
             }
             Expression::Neg(ex) => {
                 match self.emit_expr(ex)? {
@@ -1006,7 +1045,7 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}local.set {arg}")?;
             }
-            I32Store | I32Store8 | I32Load | I32Load8S => {
+            I32Store | I32Store8 | I32Load | I32Load8S | I64Load | F32Load | F64Load => {
                 let mem = decode_leb128(&mut cur)?;
                 let align = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}{} {mem} {align}", code.to_name())?;
