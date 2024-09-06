@@ -86,13 +86,13 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
             let num = slice.parse::<f64>().map_err(|s| s.to_string())?;
             Ok((
                 input,
-                Expression::LiteralFloat(num, TypeSet::F32 | TypeSet::F64),
+                Expression::LiteralFloat(num, TypeSet::f32() | TypeSet::f64()),
             ))
         } else {
             let num = slice.parse::<i64>().map_err(|s| s.to_string())?;
             Ok((
                 input,
-                Expression::LiteralInt(num, TypeSet::I32 | TypeSet::I64),
+                Expression::LiteralInt(num, TypeSet::i32() | TypeSet::i64()),
             ))
         }
     } else {
@@ -134,7 +134,7 @@ fn test_uneg() {
         num_literal("-2.5"),
         Ok((
             "",
-            Expression::LiteralFloat(-2.5, TypeSet::F32 | TypeSet::F64)
+            Expression::LiteralFloat(-2.5, TypeSet::f32() | TypeSet::f64())
         ))
     );
 }
@@ -444,7 +444,7 @@ fn fn_param(i: &str) -> IResult<&str, VarDecl> {
     let (r, ty) = if let Ok((r, ty)) = decl_ty(space(r)) {
         (r, ty.into())
     } else {
-        (r, TypeSet::ALL)
+        (r, TypeSet::all())
     };
     Ok((
         r,
@@ -494,7 +494,8 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
             );
         };
 
-        let (r, ret_ty) = fn_ret_ty(r).map_or((r, TypeSet::ALL), |(r, ty)| (r, TypeSet::from(ty)));
+        let (r, ret_ty) =
+            fn_ret_ty(r).map_or((r, TypeSet::all()), |(r, ty)| (r, TypeSet::from(ty)));
 
         let Ok((r, _)) = recognize("=")(space(r)) else {
             return Err("Syntax error in func decl: = could not be found".to_string());
@@ -514,7 +515,7 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
         ));
     }
 
-    let (r, ty) = decl_ty(r).map_or((r, TypeSet::ALL), |(r, ty)| (r, ty.into()));
+    let (r, ty) = decl_ty(r).map_or((r, TypeSet::all()), |(r, ty)| (r, ty.into()));
 
     let Ok((r, _)) = recognize("=")(space(r)) else {
         return Err("Syntax error in var decl".to_string());

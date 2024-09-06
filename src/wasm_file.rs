@@ -255,7 +255,7 @@ fn codegen(
                     )
                 })?,
             results: if ret_ty != Type::Void {
-                vec![ret_ty]
+                vec![ret_ty.clone()]
             } else {
                 vec![]
             },
@@ -284,7 +284,7 @@ fn codegen(
             .collect::<Vec<_>>();
         let mut compiler = Compiler::new(
             args.clone(),
-            ret_ty,
+            ret_ty.clone(),
             types,
             &imports,
             &mut const_table,
@@ -434,7 +434,7 @@ fn code_single(fun: &FuncDef, types: &[FuncType]) -> CompileResult<Vec<u8>> {
     let mut chunks = 0;
     let mut run_length = 0;
     for local in fun.locals.iter().skip(fn_type.params.len()) {
-        if Some(local.ty) == last {
+        if Some(&local.ty) == last {
             run_length += 1;
         } else {
             if let Some(last) = last {
@@ -453,7 +453,7 @@ fn code_single(fun: &FuncDef, types: &[FuncType]) -> CompileResult<Vec<u8>> {
                 }
             }
             run_length = 1;
-            last = Some(local.ty);
+            last = Some(&local.ty);
         }
     }
 
