@@ -3,3 +3,5 @@ struct Hey {
     first: str,
     last: str,
 }
+
+pub let format(s: Hey) -> str = "s.first + s.last";

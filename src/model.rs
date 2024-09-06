@@ -64,7 +64,13 @@ impl TryFrom<&str> for Type {
             "f64" => Type::F64,
             "void" => Type::Void,
             "str" => Type::Str,
-            _ => return Err(format!("Unknown type {}", value)),
+            s => {
+                if s.is_empty() {
+                    return Err(format!("Unknown type {}", value));
+                } else {
+                    Type::Struct(s.to_string())
+                }
+            }
         })
     }
 }
@@ -321,6 +327,11 @@ impl std::fmt::Display for TypeSet {
         write_ty(self.f64, "f64")?;
         write_ty(self.void, "void")?;
         write_ty(self.st, "str")?;
+
+        for st in &self.structs {
+            write_ty(true, st)?;
+        }
+
         if !written {
             write!(f, "(none)")?;
         }
