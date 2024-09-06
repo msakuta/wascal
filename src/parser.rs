@@ -6,6 +6,7 @@ pub enum Expression<'src> {
     LiteralFloat(f64, TypeSet),
     StrLiteral(String),
     Variable(&'src str),
+    StructLiteral(&'src str, Vec<(&'src str, Expression<'src>)>),
     FnInvoke(&'src str, Vec<Expression<'src>>),
     Cast(Box<Expression<'src>>, Type),
     FieldAccess(Box<Expression<'src>>, &'src str),
@@ -228,6 +229,30 @@ fn test_fn_call() {
     );
 }
 
+fn struct_literal<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Expression<'a>> {
+    let (mut r, _) = recognize("{")(space(i))?;
+
+    let mut fields = vec![];
+    loop {
+        let Ok((next_r, fname)) = identifier(space(r)) else {
+            break;
+        };
+        let (next_r, _) = recognize(":")(space(next_r))?;
+        let (next_r, initializer) = expression(next_r)?;
+        fields.push((fname, initializer));
+        r = next_r;
+        let Ok((next_r, _)) = recognize(",")(space(r)) else {
+            break;
+        };
+        r = next_r;
+    }
+
+    let Ok((r, _)) = recognize("}")(r) else {
+        return Err("FnInvoke is not closed".to_string());
+    };
+    return Ok((r, Expression::StructLiteral(name, fields)));
+}
+
 fn postfix_as<'a>(i: &'a str) -> IResult<&'a str, Type> {
     let (r, _) = space1(i).and_then(|r| recognize("as")(r))?;
     let (r, ty) = identifier(space1(r)?)?;
@@ -278,6 +303,10 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     let Ok((r, name)) = identifier(r) else {
         return Err("Factor is neither a numeric literal or an identifier".to_string());
     };
+
+    if let Ok((r, ex)) = struct_literal(name, r) {
+        return postfix_expr(ex, r);
+    }
 
     if let Ok((r, ex)) = fn_call(name, r) {
         return postfix_expr(ex, r);
@@ -666,6 +695,16 @@ pub fn format_expr(
         Expression::LiteralInt(num, ts) => write!(f, "{num}: {ts}"),
         Expression::StrLiteral(s) => write!(f, "\"{s}\""), // TODO: escape
         Expression::Variable(name) => write!(f, "{name}"),
+        Expression::StructLiteral(name, fields) => {
+            let indent = "  ".repeat(level);
+            writeln!(f, "{name} {{")?;
+            for field in fields {
+                write!(f, "{indent}  {}: ", field.0)?;
+                format_expr(&field.1, level, f)?;
+                writeln!(f, ",")?;
+            }
+            writeln!(f, "{indent}}}")
+        }
         Expression::FnInvoke(fname, args) => {
             write!(f, "{fname}(")?;
             for (i, arg) in args.iter().enumerate() {

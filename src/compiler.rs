@@ -435,6 +435,53 @@ impl<'a> Compiler<'a> {
                 self.i32const(str as u32);
                 Ok(Type::Str)
             }
+            Expression::StructLiteral(stname, fields) => {
+                let Some(stdef) = self.structs.get(*stname) else {
+                    return Err(format!("Struct {stname} not found"));
+                };
+
+                let Some((i_malloc, _)) = self
+                    .funcs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, fn_def)| fn_def.name == "malloc")
+                else {
+                    return Err("malloc not found".to_string());
+                };
+
+                let idx_malloc = self.imports.len() + i_malloc;
+
+                self.i32const((stdef.fields.len() * std::mem::size_of::<u32>()) as u32);
+
+                self.code.push(OpCode::Call as u8);
+                encode_leb128(&mut self.code, idx_malloc as u32).unwrap();
+
+                let ptr = self.add_local("", Type::Struct(stname.to_string()));
+
+                for (fname, field) in fields {
+                    self.local_get(ptr);
+                    let ex = self.emit_expr(field)?;
+                    let Some((idx, stfield)) = stdef
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .find(|(_, field)| &field.name == fname)
+                    else {
+                        return Err(format!("Struct field {fname} not found"));
+                    };
+                    self.code.push(match ex {
+                        Type::I32 | Type::Str => OpCode::I32Store,
+                        _ => todo!(),
+                    } as u8);
+                    encode_leb128(&mut self.code, 0).unwrap();
+                    encode_leb128(&mut self.code, (idx * std::mem::size_of::<u32>()) as u32)
+                        .unwrap();
+                }
+
+                self.local_get(ptr);
+
+                Ok(Type::Struct(stname.to_string()))
+            }
             Expression::Variable(name) => {
                 let (ret, local) = self
                     .locals
@@ -717,7 +764,7 @@ impl<'a> Compiler<'a> {
                 let ty = ty.determine().unwrap();
                 self.coerce_type(&ty, &ex_ty).map_err(|_| {
                     format!(
-                        "Variable declared type {ty:?} and initializer type {ex_ty:?} are different"
+                        "Variable declared type {ty} and initializer type {ex_ty} are different"
                     )
                 })?;
                 self.add_local(*name, ty);
@@ -828,6 +875,11 @@ impl<'a> Compiler<'a> {
             (Type::I64, Type::I32) => self.code.push(OpCode::I64ExtendI32S as u8),
             (Type::I32, Type::F64) => self.code.push(OpCode::I32TruncF64S as u8),
             (Type::F64, Type::I32) => self.code.push(OpCode::F64ConvertI32S as u8),
+            (Type::Struct(ty), Type::Struct(ex)) => {
+                if ty != ex {
+                    return Err(format!("Coercing type {ty:?} from type {ex:?} failed"));
+                }
+            }
             _ => return Err(format!("Coercing type {ty:?} from type {ex:?} failed")),
         }
         Ok(())

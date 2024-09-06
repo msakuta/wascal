@@ -4,4 +4,9 @@ struct Hey {
     last: str,
 }
 
-pub let format(s: Hey) -> str = s.first + s.last;
+let format(s: Hey) -> str = s.first + ", " + s.last;
+
+pub let main() -> str = {
+    let hey = Hey { first: "John", last: "Smith" };
+    format(hey)
+}

@@ -89,6 +89,12 @@ impl<'a> TypeInferer<'a> {
             Expression::LiteralInt(_, ts) => Ok(ts.clone()),
             Expression::LiteralFloat(_, ts) => Ok(ts.clone()),
             Expression::StrLiteral(_) => Ok(Type::Str.into()),
+            Expression::StructLiteral(name, _) => {
+                if self.structs.get(*name).is_none() {
+                    return Err(format!("Struct {name} was not found"));
+                }
+                Ok(Type::Struct(name.to_string()).into())
+            }
             Expression::Variable(name) => Ok(self
                 .locals
                 .get(*name)
@@ -151,7 +157,7 @@ impl<'a> TypeInferer<'a> {
         match ex {
             Expression::LiteralInt(_, target_ts) => *target_ts = ts.clone(),
             Expression::LiteralFloat(_, target_ts) => *target_ts = ts.clone(),
-            Expression::StrLiteral(_) => {}
+            Expression::StrLiteral(_) | Expression::StructLiteral(_, _) => {}
             Expression::Variable(name) => {
                 if let Some(var) = self.locals.get_mut(*name) {
                     dprintln!("propagate variable {name}: {var} -> {ts}");
@@ -273,7 +279,7 @@ impl<'a> TypeInferer<'a> {
                 }
                 let ex_ty = self.forward_type_expr(ex)?;
                 let ty;
-                if decl_ty != &TypeSet::default() {
+                if decl_ty != &TypeSet::all() {
                     ty = decl_ty.clone();
                 } else {
                     ty = ex_ty;

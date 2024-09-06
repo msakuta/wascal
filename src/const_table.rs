@@ -52,6 +52,11 @@ impl ConstTable {
     }
 
     pub fn finish(&mut self) {
+        let residual = self.buf.len() % PTR_SIZE;
+        if 0 < residual {
+            self.buf
+                .resize((self.buf.len() + PTR_SIZE - 1) / PTR_SIZE * PTR_SIZE, 0u8);
+        }
         let bytes = (self.buf.len() as u32).to_le_bytes();
         self.buf[..PTR_SIZE].copy_from_slice(&bytes);
     }
