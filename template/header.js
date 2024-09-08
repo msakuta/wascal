@@ -2,9 +2,10 @@ export let outputBuf = "";
 
 const opts = {
     console: {
-        log: console.log,
+        log: v => console.log(returnString(v)),
     },
     output: {
+        print: s => outputBuf += returnString(s) + "\n",
         putc: c => {
             outputBuf += String.fromCharCode(c);
         }

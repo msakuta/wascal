@@ -21,6 +21,8 @@ let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y)
 pub let main() -> f64 = {
     let vec = Vec2 { x: 1., y: 2. };
     let vec2 = Vec2 { x: 3., y: 4. };
+    print("add: " + format_vec2(vec + vec2));
     let vec3 = vec - vec2;
+    print("sub: " + format_vec2(vec3));
     dot(vec, vec3)
 }

@@ -102,6 +102,7 @@ fn write_bind(bind: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io
                 .replace("memory =", "module.memory =")
                 .replace("export let memory;", "module.memory = {};")
                 .replace("export let outputBuf = \"\";", "module.outputBuf = \"\";")
+                .replace("outputBuf += ", "module.outputBuf += ")
         )?;
     } else {
         writeln!(bind, "{}", HEADER)?;
@@ -598,6 +599,11 @@ pub fn default_imports() -> Vec<FuncImport> {
         FuncImport {
             module: "console".to_string(),
             name: "log".to_string(),
+            ty: 0,
+        },
+        FuncImport {
+            module: "output".to_string(),
+            name: "print".to_string(),
             ty: 0,
         },
         FuncImport {
