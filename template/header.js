@@ -19,7 +19,14 @@ let obj;
 export let memory;
 export async function init(wasm, moreOpts = {}){
     for (const key in moreOpts) {
-        opts[key] = moreOpts[key];
+        if (opts[key]) {
+            for (const subkey in moreOpts[key]) {
+                opts[key][subkey] = moreOpts[key][subkey];
+            }
+        }
+        else {
+            opts[key] = moreOpts[key];
+        }
     }
     if (wasm instanceof Promise) {
         obj = await WebAssembly.instantiateStreaming(wasm, opts);
@@ -45,7 +52,7 @@ function addStringToWasm(s) {
     return top;
 }
 
-function returnString(s) {
+export function returnString(s) {
     const view32 = new Int32Array(obj.instance.exports.memory.buffer, s);
     const view8 = new Int8Array(obj.instance.exports.memory.buffer, s + 4, view32[0]);
     const textDecoder = new TextDecoder('utf-8');

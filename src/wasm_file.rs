@@ -99,6 +99,7 @@ fn write_bind(bind: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io
             "{}",
             HEADER
                 .replace("export async function init", "module.init = async function")
+                .replace("export function returnString", "module.returnString = returnString;function returnString")
                 .replace("memory =", "module.memory =")
                 .replace("export let memory;", "module.memory = {};")
                 .replace("export let outputBuf = \"\";", "module.outputBuf = \"\";")

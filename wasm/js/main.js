@@ -91,6 +91,7 @@ document.getElementById("compile").addEventListener("click", () => runCommon(asy
     try {
         const [wasm, bindStr] = compile(source);
         bind = eval(bindStr);
+        opts.output.print = s => outputBuf += bind.returnString(s) + "\n";
         bind.init(wasm, opts);
         consoleElem.value = `Compiled WebAssembly module in ${wasm.length} bytes.`;
     }
@@ -104,7 +105,7 @@ document.getElementById("compile").addEventListener("click", () => runCommon(asy
     console.log(`bind: ${Object.getOwnPropertyNames(bind)}`);
     for (const expName in bind) {
         // Skip useless functions from UI
-        if (0 <= ["init", "malloc", "set", "strcat", "reverse"].indexOf(expName)) continue;
+        if (0 <= ["init", "malloc", "set", "strcat", "reverse", "returnString"].indexOf(expName)) continue;
         const expFunc = bind[expName];
         if (typeof expFunc !== "function") continue;
         const funcElem = document.createElement("div");
