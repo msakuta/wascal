@@ -693,6 +693,27 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
                 }
             }
+            (Type::Struct(_), Type::Struct(_)) => {
+                let dunder = dbg!(format!("__{name}__"));
+                let (func_idx, func) = self
+                    .funcs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, func)| func.name == dunder)
+                    .ok_or_else(|| format!("{dunder} was not found"))?;
+                if func.locals.get(0).map(|lo| &lo.ty) != Some(&lhs.clone().into()) {
+                    return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                }
+                if func.locals.get(1).map(|lo| &lo.ty) != Some(&rhs.clone().into()) {
+                    return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                }
+                let func_id = self.imports.len() + func_idx;
+
+                self.code.push(OpCode::Call as u8);
+                encode_leb128(&mut self.code, func_id as u32).map_err(|e| e.to_string())?;
+
+                return Ok(dbg!(func.ret_ty.clone()));
+            }
             _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
         };
         self.code.push(op as u8);

@@ -1,6 +1,8 @@
-use std::collections::HashSet;
+mod struct_set;
 
 use crate::parser::{StructDecl, VarDecl};
+
+pub use self::struct_set::StructSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -106,79 +108,49 @@ pub struct TypeSet {
     pub f64: bool,
     pub void: bool,
     pub st: bool,
-    pub structs: HashSet<String>,
+    pub structs: StructSet,
 }
 
 impl TypeSet {
     pub fn i32() -> Self {
         Self {
             i32: true,
-            i64: false,
-            f32: false,
-            f64: false,
-            void: false,
-            st: false,
-            structs: HashSet::new(),
+            ..Self::default()
         }
     }
 
     pub fn i64() -> Self {
         Self {
-            i32: false,
             i64: true,
-            f32: false,
-            f64: false,
-            void: false,
-            st: false,
-            structs: HashSet::new(),
+            ..Self::default()
         }
     }
 
     pub fn f32() -> Self {
         Self {
-            i32: false,
-            i64: false,
             f32: true,
-            f64: false,
-            void: false,
-            st: false,
-            structs: HashSet::new(),
+            ..Self::default()
         }
     }
 
     pub fn f64() -> Self {
         Self {
-            i32: false,
-            i64: false,
-            f32: false,
             f64: true,
-            void: false,
-            st: false,
-            structs: HashSet::new(),
+            ..Self::default()
         }
     }
 
     pub fn void() -> Self {
         Self {
-            i32: false,
-            i64: false,
-            f32: false,
-            f64: false,
             void: true,
-            st: false,
-            structs: HashSet::new(),
+            ..Self::default()
         }
     }
 
     pub fn str() -> Self {
         Self {
-            i32: false,
-            i64: false,
-            f32: false,
-            f64: false,
-            void: false,
             st: true,
-            structs: HashSet::new(),
+            ..Self::default()
         }
     }
 
@@ -190,7 +162,7 @@ impl TypeSet {
             f64: true,
             void: true,
             st: true,
-            structs: HashSet::new(),
+            structs: StructSet::Any,
         }
     }
 
@@ -227,10 +199,7 @@ impl TypeSet {
             }
             None
         } else if self.is_non_primitive() && self.structs.len() == 1 {
-            self.structs
-                .iter()
-                .next()
-                .map(|name| Type::Struct(name.clone()))
+            self.structs.first().map(|name| Type::Struct(name.clone()))
         } else {
             None
         }
@@ -246,7 +215,7 @@ impl From<u8> for TypeSet {
             f64: value & 0x8 != 0,
             void: value & 0x10 != 0,
             st: value & 0x20 != 0,
-            structs: HashSet::new(),
+            structs: StructSet::Any,
         }
     }
 }
@@ -261,7 +230,7 @@ impl std::ops::BitOr for TypeSet {
             f64: self.f64 | rhs.f64,
             void: self.void | rhs.void,
             st: self.st | rhs.st,
-            structs: self.structs.union(&rhs.structs).cloned().collect(),
+            structs: self.structs.union(&rhs.structs),
         }
     }
 }
@@ -276,7 +245,7 @@ impl std::ops::BitAnd for TypeSet {
             f64: self.f64 & rhs.f64,
             void: self.void & rhs.void,
             st: self.st & rhs.st,
-            structs: self.structs.intersection(&rhs.structs).cloned().collect(),
+            structs: self.structs.intersection(&rhs.structs),
         }
     }
 }
@@ -291,7 +260,7 @@ impl std::ops::BitAnd for &TypeSet {
             f64: self.f64 & rhs.f64,
             void: self.void & rhs.void,
             st: self.st & rhs.st,
-            structs: self.structs.intersection(&rhs.structs).cloned().collect(),
+            structs: self.structs.intersection(&rhs.structs),
         }
     }
 }
@@ -323,7 +292,8 @@ impl From<&Type> for TypeSet {
 
 impl std::fmt::Display for TypeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.i32 & self.i64 & self.f32 & self.f64 & self.void & self.st {
+        if self.i32 & self.i64 & self.f32 & self.f64 & self.void & self.st && self.structs.is_any()
+        {
             return write!(f, "any");
         }
         let mut written = false;

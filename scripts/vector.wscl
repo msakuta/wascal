@@ -4,9 +4,23 @@ struct Vec2 {
     y: f64,
 }
 
+let __add__(lhs: Vec2, rhs: Vec2) = Vec2 {
+    x: lhs.x + rhs.x,
+    y: lhs.y + rhs.y,
+}
+
+let __sub__(lhs: Vec2, rhs: Vec2) = Vec2 {
+    x: lhs.x - rhs.x,
+    y: lhs.y - rhs.y,
+}
+
+let dot(lhs: Vec2, rhs: Vec2) = lhs.x * rhs.x + lhs.y * rhs.y;
+
 let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ")";
 
-pub let main() -> str = {
+pub let main() -> f64 = {
     let vec = Vec2 { x: 1., y: 2. };
-    format_vec2(vec)
+    let vec2 = Vec2 { x: 3., y: 4. };
+    let vec3 = vec - vec2;
+    dot(vec, vec3)
 }
