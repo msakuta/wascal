@@ -1,0 +1,57 @@
+
+struct Vec3 {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+let __add__(lhs: Vec3, rhs: Vec3) = Vec3 {
+    x: lhs.x + rhs.x,
+    y: lhs.y + rhs.y,
+    z: lhs.z + rhs.z,
+}
+
+let __sub__(lhs: Vec3, rhs: Vec3) = Vec3 {
+    x: lhs.x - rhs.x,
+    y: lhs.y - rhs.y,
+    z: lhs.z - rhs.z,
+}
+
+let dot(lhs: Vec3, rhs: Vec3) -> f64 = lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+let length2(v: Vec3) -> f64 = dot(v, v);
+let normalize(v: Vec3) -> Vec3 = {
+    let leng: f64 = sqrt(length2(v));
+    Vec3 { x: v.x / leng, y: v.y / leng, z: v.z / leng }
+}
+
+let format_vec3(s: Vec3) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ", " + format_f64(s.z) + ")";
+
+pub let main() -> void = {
+    let sphere = Vec3 { x: 0., y: 0., z: -10. };
+    let light = Vec3 { x: 0.5, y: 1., z: 1. };
+    let radius = 5.;
+    let pixels: i32 = 16;
+    let width: i32 = 8;
+    for y in -pixels to pixels {
+        for x in -pixels to pixels {
+
+            let ray = normalize(Vec3 { x: x as f64 / pixels as f64, y: y as f64 / pixels as f64, z: -1. });
+
+            let sp = dot(ray, sphere);
+
+            let slen = length2(ray);
+            let c = length2(sphere) - radius * radius;
+
+            let discrim = sp * sp - c;
+            if 0. < discrim {
+                set_fill_style(255, 0, 0);
+            } else if y < 0 {
+                set_fill_style(63, 127, 191 - y);
+            } else {
+                set_fill_style(127, 191 + y, 127);
+            }
+
+            rectangle((x + pixels) * width, (y + pixels) * width, width, width);
+        }
+    }
+}
