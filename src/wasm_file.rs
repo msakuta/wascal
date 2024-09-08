@@ -88,25 +88,30 @@ pub fn compile_wasm(
 
 /// Write a JS binding code, similar to wasm-bindgen does for Rust.
 /// `module` flag indicates whether the output JS code should be a ES6 module or an IIFE.
-fn write_bind(bind: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io::Result<()> {
+fn write_bind(f: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io::Result<()> {
     // Include boilerplate code for binding
     const HEADER: &str = include_str!("../template/header.js");
 
     if !module {
-        writeln!(bind, "(function(){{\nconst module = {{}};")?;
+        writeln!(f, "(function(){{\nconst module = {{}};")?;
         writeln!(
-            bind,
+            f,
             "{}",
             HEADER
                 .replace("export async function init", "module.init = async function")
-                .replace("export function returnString", "module.returnString = returnString;function returnString")
+                .replace(
+                    "export function returnString",
+                    "module.returnString = returnString;function returnString"
+                )
                 .replace("memory =", "module.memory =")
                 .replace("export let memory;", "module.memory = {};")
                 .replace("export let outputBuf = \"\";", "module.outputBuf = \"\";")
                 .replace("outputBuf += ", "module.outputBuf += ")
         )?;
+        writeln!(f, "module.exports = {{}};")?;
     } else {
-        writeln!(bind, "{}", HEADER)?;
+        writeln!(f, "{}", HEADER)?;
+        writeln!(f, "export exports = {{}};")?;
     }
 
     for func in funcs {
@@ -149,15 +154,15 @@ fn write_bind(bind: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io
             );
 
             if module {
-                writeln!(bind, "export function {}{fn_body}", func.name)?;
+                writeln!(f, "export function {}{fn_body}", func.name)?;
             } else {
-                writeln!(bind, "module.{} = function{fn_body}", func.name)?;
+                writeln!(f, "module.exports.{} = function{fn_body}", func.name)?;
             }
         }
     }
 
     if !module {
-        writeln!(bind, "return module;\n}})()")?;
+        writeln!(f, "return module;\n}})()")?;
     }
 
     Ok(())

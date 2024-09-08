@@ -73,9 +73,9 @@ window.addEventListener("load", () => {
         const functions = document.getElementById("functions");
         while (functions.firstChild) functions.removeChild(functions.firstChild);
         functionElems = [];
-        for (let expName in implib) {
+        for (let expName in implib.exports) {
             if (0 <= ["init", "malloc", "set", "strcat", "reverse", "returnString"].indexOf(expName)) continue;
-            const expFunc = implib[expName];
+            const expFunc = implib.exports[expName];
             if (typeof expFunc !== "function") continue;
             const funcElem = document.createElement("div");
             const fNameElem = document.createTextNode(expName + "(");
@@ -108,7 +108,7 @@ window.addEventListener("load", () => {
     })();
 
     const callFunc = expName => async () => {
-        const expFunc = implib[expName];
+        const expFunc = implib.exports[expName];
         console.log("Calling wasm");
         let outputBuf = "";
         const start = performance.now();

@@ -33,7 +33,7 @@ async function runCommon(process) {
 }
 
 async function callFunc(bind, expName) {
-    const expFunc = bind[expName];
+    const expFunc = bind.exports[expName];
     console.log("Calling wasm");
     const argElems = functionElems[expName];
     let args = [];
@@ -102,11 +102,11 @@ document.getElementById("compile").addEventListener("click", () => runCommon(asy
     const functions = document.getElementById("functions");
     while (functions.firstChild) functions.removeChild(functions.firstChild);
     functionElems = [];
-    console.log(`bind: ${Object.getOwnPropertyNames(bind)}`);
-    for (const expName in bind) {
+    console.log(`bind: ${Object.getOwnPropertyNames(bind.exports)}`);
+    for (const expName in bind.exports) {
         // Skip useless functions from UI
-        if (0 <= ["init", "malloc", "set", "strcat", "reverse", "returnString"].indexOf(expName)) continue;
-        const expFunc = bind[expName];
+        if (0 <= ["malloc", "set", "strcat", "reverse"].indexOf(expName)) continue;
+        const expFunc = bind.exports[expName];
         if (typeof expFunc !== "function") continue;
         const funcElem = document.createElement("div");
         const fNameElem = document.createTextNode(expName + "(");
