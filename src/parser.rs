@@ -240,11 +240,11 @@ fn struct_literal<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Expression<
         let (next_r, _) = recognize(":")(space(next_r))?;
         let (next_r, initializer) = expression(next_r)?;
         fields.push((fname, initializer));
-        r = next_r;
-        let Ok((next_r, _)) = recognize(",")(space(r)) else {
+        r = space(next_r);
+        let Ok((next_r, _)) = recognize(",")(r) else {
             break;
         };
-        r = next_r;
+        r = space(next_r);
     }
 
     let Ok((r, _)) = recognize("}")(r) else {

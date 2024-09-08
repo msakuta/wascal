@@ -1,0 +1,20 @@
+struct Vec2 {
+    x: f64,
+    y: f64,
+}
+
+struct Mat {
+    w: Vec2,
+    z: Vec2,
+}
+
+let format_vec(s: Vec2) -> str = format_f64(s.x) + ", " + format_f64(s.y);
+let format_mat(s: Mat) -> str = format_vec(s.w) + ", " + format_vec(s.z);
+
+pub let main() -> str = {
+    let m = Mat {
+        w: Vec2 { x: 10., y: 20. },
+        z: Vec2 { x: 30., y: 40. },
+    };
+    format_mat(m)
+}
