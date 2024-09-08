@@ -87,16 +87,29 @@
 
             <h2>Built-in functions</h2>
 
+            <h3>System calls</h3>
+            System calls are exposed from Wasm binary and the runtime directly implements them.
+            They are customized for this web page, but Wascal language itself can run outside the web browser.
+            System calls functionality could be overridden in the embedded environment.
+
             <ul>
-            <li>malloc(size: i32) -> i32 - Allocates heap memory block with the given size and return a pointer to it.</li>
-            <li>set(ptr: i32, c: i32) - Sets a memory byte at given address. A low level function that end users shouldn't use.</li>
-            <li>strcat(lhs: str, rhs: str) -> str - Standard library function that is used to concatenate strings. Uses should use + operator between strings.</li>
-            <li>reverse(s: str) -> str - Standard library function that reverses a string.</li>
+            <li>print(s: str) - Prints a string to the output console.</li>
             <li>log(value: i32) - Prints a value to JavaScript console (console.log).</li>
             <li>putc(char: i32) - Puts a single character, specified by ascii code, to the output console.</li>
             <li>format_f64(v: f64) -> str - Formats a f64 to a string.</li>
             <li>set_fill_style(r: i32, g: i32, b: i32) - Sets fill color for painting on the canvas.</li>
             <li>rectangle(x: i32, y: i32, width: i32, height: i32) - Draws a filled rectangle on the canvas.</li>
+            </ul>
+
+            <h3>Standard library</h3>
+            Standard library is a collection of built-in functions that are commonly used in Wasm runtime.
+            They are used by compiler, not meant to be used by end users.
+
+            <ul>
+            <li>malloc(size: i32) -> i32 - Allocates heap memory block with the given size and return a pointer to it.</li>
+            <li>set(ptr: i32, c: i32) - Sets a memory byte at given address. A low level function that end users shouldn't use.</li>
+            <li>strcat(lhs: str, rhs: str) -> str - Standard library function that is used to concatenate strings. Uses should use + operator between strings.</li>
+            <li>reverse(s: str) -> str - Standard library function that reverses a string.</li>
             </ul>
 
             <h2>Syntax</h2>
@@ -271,6 +284,27 @@ struct Vec2 {
     y: f64,
 }
             </pre>
+
+            <h3>Dunder methods and Operator Overloading</h3>
+
+            You can overload certain binary operators with dunder methods, similar to Python.
+
+            <pre>
+let __add__(lhs: Vec2, rhs: Vec2) = Vec2 {
+    x: lhs.x + rhs.x,
+    y: lhs.y + rhs.y,
+}
+
+let __sub__(lhs: Vec2, rhs: Vec2) = Vec2 {
+    x: lhs.x - rhs.x,
+    y: lhs.y - rhs.y,
+}
+            </pre>
+
+            <p>
+            However, this feature is pretty incomplete, since we do not support overloading of functions yet.
+            You can define only one operator overloading for all the structs.
+            </p>
 
             <h3>Struct field access</h3>
             With a dot postfix expression, you can access a field of a struct.
