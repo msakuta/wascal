@@ -6,12 +6,8 @@ struct Vec2 {
 
 let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ")";
 
-let assign_x(s: Vec2, val: f64) = {
-    s.x = val;
-}
-
 pub let main() -> str = {
     let vec = Vec2 { x: 1., y: 2. };
-    assign_x(vec, 3.);
+    vec.x = 3.;
     format_vec2(vec)
 }
