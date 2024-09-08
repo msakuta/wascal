@@ -212,7 +212,7 @@ const LT_TYPE_MAP: TypeMap = TypeMap {
 #[derive(Clone, Copy, Debug)]
 enum LValue {
     Local(usize),
-    Memory,
+    Memory(usize),
 }
 
 /// A environment for compiling a function. Note that a program is made of multiple functions,
@@ -690,13 +690,12 @@ impl<'a> Compiler<'a> {
                 match st {
                     LValue::Local(local) => {
                         self.local_get(local);
-                        Ok((LValue::Memory, stfield.ty.clone()))
                     }
-                    LValue::Memory => {
-                        self.i32load(0)?;
-                        Ok((LValue::Memory, stfield.ty.clone()))
+                    LValue::Memory(offset) => {
+                        self.i32load(offset as u32)?;
                     }
                 }
+                Ok((LValue::Memory(stfield.offset), stfield.ty.clone()))
             }
             Expression::Neg(_)
             | Expression::Add(_, _)
@@ -807,11 +806,11 @@ impl<'a> Compiler<'a> {
                         self.code.push(OpCode::LocalSet as u8);
                         encode_leb128(&mut self.code, local as u32).unwrap();
                     }
-                    LValue::Memory => match ty {
-                        Type::I32 | Type::Str | Type::Struct(_) => self.i32store(0)?,
-                        Type::I64 => self.i64store(0)?,
-                        Type::F32 => self.f32store(0)?,
-                        Type::F64 => self.f64store(0)?,
+                    LValue::Memory(offset) => match ty {
+                        Type::I32 | Type::Str | Type::Struct(_) => self.i32store(offset as u32)?,
+                        Type::I64 => self.i64store(offset as u32)?,
+                        Type::F32 => self.f32store(offset as u32)?,
+                        Type::F64 => self.f64store(offset as u32)?,
                         Type::Void => return Err("Cannot store to a void".to_string()),
                     },
                 }

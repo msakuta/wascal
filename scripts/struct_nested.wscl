@@ -16,5 +16,6 @@ pub let main() -> str = {
         w: Vec2 { x: 10., y: 20. },
         z: Vec2 { x: 30., y: 40. },
     };
+    m.z.y = 400.;
     format_mat(m)
 }

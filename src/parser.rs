@@ -271,7 +271,7 @@ fn postfix_expr<'a>(expr: Expression<'a>, i: &'a str) -> IResult<&'a str, Expres
     }
 
     if let Ok((r, p_dot)) = postfix_dot(i) {
-        return Ok((r, Expression::FieldAccess(Box::new(expr), p_dot)));
+        return postfix_expr(Expression::FieldAccess(Box::new(expr), p_dot), r);
     }
 
     Ok((i, expr))
