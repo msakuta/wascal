@@ -27,7 +27,7 @@ pub enum Expression<'src> {
 #[derive(Debug, PartialEq)]
 pub enum Statement<'src> {
     VarDecl(&'src str, TypeSet, Expression<'src>),
-    VarAssign(&'src str, Expression<'src>),
+    VarAssign(Expression<'src>, Expression<'src>),
     Expr(Expression<'src>),
     FnDecl(FnDecl<'src>),
     For(For<'src>),
@@ -469,13 +469,13 @@ fn for_stmt(i: &str) -> IResult<&str, Statement> {
 }
 
 fn var_assign(i: &str) -> IResult<&str, Statement> {
-    let (r, name) = identifier(space(i))?;
+    let (r, lhs) = expression(space(i))?;
     let (r, _) = recognize("=")(space(r))?;
     let (r, ex) = expression(space(r))?;
     if let Ok((r, _)) = recognize(";")(space(r)) {
-        return Ok((r, Statement::VarAssign(name, ex)));
+        return Ok((r, Statement::VarAssign(lhs, ex)));
     }
-    Ok((r, Statement::VarAssign(name, ex)))
+    Ok((r, Statement::VarAssign(lhs, ex)))
 }
 
 fn decl_ty(i: &str) -> IResult<&str, Type> {
@@ -781,8 +781,10 @@ pub fn format_stmt(
             format_expr(init, level, f)?;
             writeln!(f, ";")
         }
-        Statement::VarAssign(name, ex) => {
-            write!(f, "{indent}{name} = ")?;
+        Statement::VarAssign(lhs, ex) => {
+            write!(f, "{indent}")?;
+            format_expr(lhs, level, f)?;
+            write!(f, " = ")?;
             format_expr(ex, level, f)?;
             writeln!(f, ";")
         }

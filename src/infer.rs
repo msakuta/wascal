@@ -4,7 +4,7 @@ use std::{collections::HashMap, io::Write};
 
 use crate::{
     model::{FuncDef, StructDef, TypeSet},
-    parser::{format_stmt, Expression, Statement, StructDecl},
+    parser::{format_stmt, Expression, Statement},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
 };
@@ -237,10 +237,8 @@ impl<'a> TypeInferer<'a> {
                     *decl_ty = var_ts;
                 }
             }
-            Statement::VarAssign(name, ex) => {
-                let Some(var_ts) = self.locals.get(*name) else {
-                    return Err(format!("Assigned-to variable not declared: {name}"));
-                };
+            Statement::VarAssign(lhs, ex) => {
+                let var_ts = self.forward_type_expr(lhs)?;
                 self.propagate_type_expr(ex, &var_ts.clone())?;
             }
             Statement::Expr(ex) => self.propagate_type_expr(ex, ts)?,
@@ -279,6 +277,40 @@ impl<'a> TypeInferer<'a> {
         Ok(())
     }
 
+    fn forward_lvalue(&mut self, ast: &Expression) -> Result<Option<(String, TypeSet)>, String> {
+        match ast {
+            Expression::LiteralInt(_, _) => Err("Literal int cannot be a lvalue".to_string()),
+            Expression::LiteralFloat(_, _) => Err("Literal float cannot be a lvalue".to_string()),
+            Expression::StrLiteral(_) => Err("Literal string cannot be a lvalue".to_string()),
+            Expression::StructLiteral(_, _) => Err("Literal struct cannot be a lvalue".to_string()),
+            Expression::Variable(name) => {
+                let ts = self
+                    .locals
+                    .get(*name)
+                    .ok_or_else(|| format!("Variable {name} not found"))?;
+                Ok(Some((name.to_string(), ts.clone())))
+            }
+            Expression::FnInvoke(_, _) => {
+                Err("Function return value cannot be a lvalue".to_string())
+            }
+            Expression::Cast(_, _) => Err("Cast expression cannot be a lvalue".to_string()),
+            Expression::FieldAccess(_, _) => {
+                // Struct fields have fixed types, so we do not need to propagate type inference.
+                Ok(None)
+            }
+            Expression::Neg(_)
+            | Expression::Add(_, _)
+            | Expression::Sub(_, _)
+            | Expression::Mul(_, _)
+            | Expression::Div(_, _)
+            | Expression::Lt(_, _)
+            | Expression::Gt(_, _)
+            | Expression::Conditional(_, _, _) => {
+                Err("Arithmetic expression cannot be a lvalue".to_string())
+            }
+        }
+    }
+
     fn forward_type_stmt(&mut self, stmt: &Statement) -> Result<TypeSet, String> {
         match stmt {
             Statement::Expr(ex) => self.forward_type_expr(ex),
@@ -297,15 +329,13 @@ impl<'a> TypeInferer<'a> {
                 self.locals.insert(name.to_string(), ty);
                 Ok(Type::Void.into())
             }
-            Statement::VarAssign(name, ex) => {
-                let Some(decl_ty) = self.locals.get(*name) else {
-                    return Err(format!("Assigned-to variable not declared: {name}"));
-                };
-                let decl_ty = decl_ty.clone();
-                let ex_ty = self.forward_type_expr(ex)?;
-                let ty = decl_ty & ex_ty;
-                dprintln!("forward varassign {name}: {ty}");
-                self.locals.insert(name.to_string(), ty);
+            Statement::VarAssign(lhs, ex) => {
+                if let Some((name, decl_ty)) = self.forward_lvalue(lhs)? {
+                    let ex_ty = self.forward_type_expr(ex)?;
+                    let ty = decl_ty & ex_ty;
+                    dprintln!("forward varassign {ty}");
+                    self.locals.insert(name, ty);
+                }
                 Ok(Type::Void.into())
             }
             Statement::Brace(stmts) => {

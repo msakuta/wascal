@@ -1,3 +1,4 @@
+mod emit;
 mod malloc;
 mod set;
 mod strcat;
@@ -208,6 +209,12 @@ const LT_TYPE_MAP: TypeMap = TypeMap {
     st: None,
 };
 
+#[derive(Clone, Copy, Debug)]
+enum LValue {
+    Local(usize),
+    Memory,
+}
+
 /// A environment for compiling a function. Note that a program is made of multiple functions,
 /// so you need multiple instances of this object.
 pub struct Compiler<'a> {
@@ -347,45 +354,6 @@ impl<'a> Compiler<'a> {
 
         self.local_get(ret_buf);
         Ok(Type::I32)
-    }
-
-    fn i32const(&mut self, val: u32) {
-        self.code.push(OpCode::I32Const as u8);
-        encode_leb128(&mut self.code, val).unwrap();
-    }
-
-    #[allow(dead_code)]
-    fn i32and(&mut self, val: u32) {
-        self.code.push(OpCode::I32And as u8);
-        encode_sleb128(&mut self.code, val as i32).unwrap();
-    }
-
-    fn i32load(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Load as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
-    }
-
-    fn i32load8_s(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Load8S as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
-    }
-
-    fn i32store(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Store as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
-    }
-
-    fn i32store8(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Store8 as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
     }
 
     pub fn get_code(&self) -> &[u8] {
@@ -547,15 +515,7 @@ impl<'a> Compiler<'a> {
                 let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname) else {
                     return Err(format!("Struct field {fname} not found"));
                 };
-                self.code.push(match stfield.ty {
-                    Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Load,
-                    Type::I64 => OpCode::I64Load,
-                    Type::F32 => OpCode::F32Load,
-                    Type::F64 => OpCode::F64Load,
-                    Type::Void => return Ok(Type::Void),
-                } as u8);
-                encode_leb128(&mut self.code, 0).unwrap();
-                encode_leb128(&mut self.code, stfield.offset as u32).unwrap();
+                self.field_load(stfield)?;
                 Ok(stfield.ty.clone())
             }
             Expression::Neg(ex) => {
@@ -686,6 +646,71 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Emit lvalue from expression. It produces exactly one value onto the stack, so we don't need to return index
+    fn emit_lvalue(&mut self, ast: &Expression) -> Result<(LValue, Type), String> {
+        match ast {
+            Expression::LiteralInt(_, _) => Err("Literal int cannot be a lvalue".to_string()),
+            Expression::LiteralFloat(_, _) => Err("Literal float cannot be a lvalue".to_string()),
+            Expression::StrLiteral(_) => Err("Literal string cannot be a lvalue".to_string()),
+            Expression::StructLiteral(_, _) => Err("Literal struct cannot be a lvalue".to_string()),
+            Expression::Variable(name) => {
+                let (ret, local) = self
+                    .locals
+                    .iter()
+                    .enumerate()
+                    .find(|(_, local)| &local.name == name)
+                    .ok_or_else(|| format!("Variable {name} not found"))?;
+                Ok((
+                    LValue::Local(ret),
+                    local
+                        .ty
+                        .determine()
+                        .ok_or_else(|| "Type could not be determined".to_string())?,
+                ))
+            }
+            Expression::FnInvoke(_, _) => {
+                Err("Function return value cannot be a lvalue".to_string())
+            }
+            Expression::Cast(_, _) => Err("Cast expression cannot be a lvalue".to_string()),
+            Expression::FieldAccess(ex, fname) => {
+                let (st, ty) = self.emit_lvalue(ex)?;
+
+                let Type::Struct(stname) = &ty else {
+                    return Err("Field access operator applied to a non-struct".to_string());
+                };
+
+                let Some(stdef) = self.structs.get(stname) else {
+                    return Err(format!("Struct {stname} was not found"));
+                };
+
+                let Some(stfield) = stdef.fields.iter().find(|f| &f.name == fname) else {
+                    return Err(format!("Struct field {fname} was not found"));
+                };
+
+                match st {
+                    LValue::Local(local) => {
+                        self.local_get(local);
+                        Ok((LValue::Memory, stfield.ty.clone()))
+                    }
+                    LValue::Memory => {
+                        self.i32load(0)?;
+                        Ok((LValue::Memory, stfield.ty.clone()))
+                    }
+                }
+            }
+            Expression::Neg(_)
+            | Expression::Add(_, _)
+            | Expression::Sub(_, _)
+            | Expression::Mul(_, _)
+            | Expression::Div(_, _)
+            | Expression::Lt(_, _)
+            | Expression::Gt(_, _)
+            | Expression::Conditional(_, _, _) => {
+                Err("Arithmetic expression cannot be a lvalue".to_string())
+            }
+        }
+    }
+
     fn local_get(&mut self, idx: usize) {
         self.code.push(OpCode::LocalGet as u8);
         encode_leb128(&mut self.code, idx as u32).unwrap();
@@ -774,16 +799,22 @@ impl<'a> Compiler<'a> {
                 self.add_local(*name, ty);
                 Ok(Type::Void)
             }
-            Statement::VarAssign(name, ex) => {
+            Statement::VarAssign(lhs, ex) => {
+                let (lvalue, ty) = self.emit_lvalue(lhs)?;
                 self.emit_expr(ex)?;
-                let (idx, _) = self
-                    .locals
-                    .iter()
-                    .enumerate()
-                    .find(|(_, local)| &local.name == name)
-                    .ok_or_else(|| format!("Variable {name} not found"))?;
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, idx as u32).unwrap();
+                match lvalue {
+                    LValue::Local(local) => {
+                        self.code.push(OpCode::LocalSet as u8);
+                        encode_leb128(&mut self.code, local as u32).unwrap();
+                    }
+                    LValue::Memory => match ty {
+                        Type::I32 | Type::Str | Type::Struct(_) => self.i32store(0)?,
+                        Type::I64 => self.i64store(0)?,
+                        Type::F32 => self.f32store(0)?,
+                        Type::F64 => self.f64store(0)?,
+                        Type::Void => return Err("Cannot store to a void".to_string()),
+                    },
+                }
                 Ok(Type::Void)
             }
             Statement::FnDecl(_) => {
