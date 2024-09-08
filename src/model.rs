@@ -305,6 +305,13 @@ impl From<Type> for TypeSet {
     }
 }
 
+impl From<&Type> for TypeSet {
+    fn from(value: &Type) -> Self {
+        let value = value.clone();
+        value.into()
+    }
+}
+
 impl std::fmt::Display for TypeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.i32 & self.i64 & self.f32 & self.f64 & self.void & self.st {

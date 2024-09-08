@@ -341,8 +341,6 @@ fn get_structs<'src>(stmts: &[Statement<'src>]) -> CompileResult<HashMap<String,
 
     find_structs(stmts, &mut structs);
 
-    dbg!(&structs);
-
     Ok(structs)
 }
 

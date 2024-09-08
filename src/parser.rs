@@ -261,7 +261,6 @@ fn postfix_as<'a>(i: &'a str) -> IResult<&'a str, Type> {
 
 fn postfix_dot<'a>(i: &'a str) -> IResult<&'a str, &'a str> {
     let (r, _) = recognize(".")(space(i))?;
-    dbg!(r);
     let (r, field) = identifier(space(r))?;
     Ok((r, field))
 }
@@ -576,7 +575,6 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
 /// The difference from [`fn_param`] is that the type is not optional.
 fn struct_field(i: &str) -> IResult<&str, StructField> {
     let (r, field_name) = identifier(space(i))?;
-    dbg!(field_name);
     let (r, ty) = decl_ty(space(r))?;
     Ok((
         r,
@@ -593,8 +591,6 @@ fn struct_def(i: &str) -> IResult<&str, Statement> {
     };
 
     let (r, name) = identifier(space(r))?;
-
-    dbg!(name);
 
     let (mut r, _) = recognize("{")(space(r))?;
 
@@ -703,7 +699,7 @@ pub fn format_expr(
                 format_expr(&field.1, level, f)?;
                 writeln!(f, ",")?;
             }
-            writeln!(f, "{indent}}}")
+            write!(f, "{indent}}}")
         }
         Expression::FnInvoke(fname, args) => {
             write!(f, "{fname}(")?;

@@ -157,7 +157,16 @@ impl<'a> TypeInferer<'a> {
         match ex {
             Expression::LiteralInt(_, target_ts) => *target_ts = ts.clone(),
             Expression::LiteralFloat(_, target_ts) => *target_ts = ts.clone(),
-            Expression::StrLiteral(_) | Expression::StructLiteral(_, _) => {}
+            Expression::StrLiteral(_) => {}
+            Expression::StructLiteral(name, fields) => {
+                if let Some(stdef) = self.structs.get(*name) {
+                    for ((_, ex), stfield) in fields.iter_mut().zip(stdef.fields.iter()) {
+                        self.propagate_type_expr(ex, &stfield.ty.clone().into())?;
+                    }
+                } else {
+                    return Err(format!("Undefined struct {name}"));
+                }
+            }
             Expression::Variable(name) => {
                 if let Some(var) = self.locals.get_mut(*name) {
                     dprintln!("propagate variable {name}: {var} -> {ts}");
