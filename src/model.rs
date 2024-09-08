@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::parser::VarDecl;
+use crate::parser::{StructDecl, VarDecl};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -35,6 +35,15 @@ impl Type {
     pub(crate) fn word_count(&self) -> usize {
         match self {
             Self::Str | Self::I32 | Self::I64 | Self::F32 | Self::F64 | Self::Struct(_) => 1,
+            Self::Void => 0,
+        }
+    }
+
+    /// Size occupied in linear memory, in bytes.
+    pub(crate) fn size(&self) -> usize {
+        match self {
+            Self::Str | Self::I32 | Self::F32 | Self::Struct(_) => 4,
+            Self::I64 | Self::F64 => 8,
             Self::Void => 0,
         }
     }
@@ -366,4 +375,35 @@ pub(crate) struct FuncDef {
     pub code: Vec<u8>,
     pub locals: Vec<VarDecl>,
     pub public: bool,
+}
+
+pub(crate) struct StructDef {
+    pub(crate) fields: Vec<StructFieldDef>,
+    pub(crate) size: usize,
+}
+
+impl<'a> From<&StructDecl<'a>> for StructDef {
+    fn from(value: &StructDecl) -> Self {
+        let mut offset = 0;
+        let mut fields = vec![];
+        for field in &value.fields {
+            fields.push(StructFieldDef {
+                name: field.name.to_string(),
+                ty: field.ty.clone(),
+                offset,
+            });
+            offset += field.ty.size();
+        }
+
+        Self {
+            fields,
+            size: offset,
+        }
+    }
+}
+
+pub(crate) struct StructFieldDef {
+    pub(crate) name: String,
+    pub(crate) ty: Type,
+    pub(crate) offset: usize,
 }

@@ -3,8 +3,8 @@
 use std::{collections::HashMap, io::Write};
 
 use crate::{
-    model::{FuncDef, TypeSet},
-    parser::{format_stmt, Expression, Statement, StructDef},
+    model::{FuncDef, StructDef, TypeSet},
+    parser::{format_stmt, Expression, Statement, StructDecl},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
 };
@@ -67,14 +67,14 @@ struct TypeInferer<'a> {
     ret_ty: TypeSet,
     funcs: &'a HashMap<String, TypeInferFn>,
     locals: HashMap<String, TypeSet>,
-    structs: &'a HashMap<String, StructDef<'a>>,
+    structs: &'a HashMap<String, StructDef>,
 }
 
 impl<'a> TypeInferer<'a> {
     pub fn new(
         ret_ty: TypeSet,
         funcs: &'a HashMap<String, TypeInferFn>,
-        structs: &'a HashMap<String, StructDef<'a>>,
+        structs: &'a HashMap<String, StructDef>,
     ) -> Self {
         Self {
             ret_ty,
@@ -417,7 +417,7 @@ pub fn run_type_infer<'src>(
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
     funcs: &[FuncDef],
-    structs: &HashMap<String, StructDef<'src>>,
+    structs: &HashMap<String, StructDef>,
     typeinf_f: Option<&mut dyn Write>,
 ) -> CompileResult<()> {
     let mut type_infer_funcs = HashMap::new();

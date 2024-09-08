@@ -33,7 +33,7 @@ pub enum Statement<'src> {
     For(For<'src>),
     Brace(Vec<Statement<'src>>),
     Return(Option<Expression<'src>>),
-    Struct(StructDef<'src>),
+    Struct(StructDecl<'src>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -69,7 +69,7 @@ pub struct StructField<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StructDef<'src> {
+pub struct StructDecl<'src> {
     pub(crate) name: &'src str,
     pub(crate) fields: Vec<StructField<'src>>,
 }
@@ -605,7 +605,7 @@ fn struct_def(i: &str) -> IResult<&str, Statement> {
 
     let (r, _) = recognize("}")(space(r))?;
 
-    Ok((r, Statement::Struct(StructDef { name, fields })))
+    Ok((r, Statement::Struct(StructDecl { name, fields })))
 }
 
 fn statement(i: &str) -> Result<(&str, Statement), String> {

@@ -9,8 +9,8 @@ use std::{
 
 use crate::{
     const_table::ConstTable,
-    model::{FuncDef, FuncImport, FuncType, Type},
-    parser::{Expression, For, Statement, StructDef, VarDecl},
+    model::{FuncDef, FuncImport, FuncType, StructDef, Type},
+    parser::{Expression, For, Statement, VarDecl},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -33,7 +33,11 @@ pub(crate) enum OpCode {
     F64Load = 0x2b,
     I32Load8S = 0x2c,
     I32Store = 0x36,
+    I64Store = 0x37,
+    F32Store = 0x38,
+    F64Store = 0x39,
     I32Store8 = 0x3a,
+    I64Store8 = 0x3c,
     I32Const = 0x41,
     I64Const = 0x42,
     F32Const = 0x43,
@@ -130,7 +134,11 @@ impl_op_from!(
     F64Load: "f64.load",
     I32Load8S: "i32.load8_s",
     I32Store: "i32.store",
+    I64Store: "i64.store",
+    F32Store: "f32.store",
+    F64Store: "f64.store",
     I32Store8: "i32.store8",
+    I64Store8: "i64.store8",
     I32Const: "i32.const",
     I64Const: "i64.const",
     F32Const: "f32.const",
@@ -211,7 +219,7 @@ pub struct Compiler<'a> {
     const_table: &'a mut ConstTable,
     /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
-    structs: &'a HashMap<String, StructDef<'a>>,
+    structs: &'a HashMap<String, StructDef>,
 }
 
 impl<'a> Compiler<'a> {
@@ -222,7 +230,7 @@ impl<'a> Compiler<'a> {
         imports: &'a [FuncImport],
         const_table: &'a mut ConstTable,
         funcs: &'a mut Vec<FuncDef>,
-        structs: &'a HashMap<String, StructDef<'a>>,
+        structs: &'a HashMap<String, StructDef>,
     ) -> Self {
         let locals = args;
         Self {
@@ -451,7 +459,7 @@ impl<'a> Compiler<'a> {
 
                 let idx_malloc = self.imports.len() + i_malloc;
 
-                self.i32const((stdef.fields.len() * std::mem::size_of::<u32>()) as u32);
+                self.i32const(stdef.size as u32);
 
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, idx_malloc as u32).unwrap();
@@ -461,21 +469,22 @@ impl<'a> Compiler<'a> {
                 for (fname, field) in fields {
                     self.local_get(ptr);
                     let ex = self.emit_expr(field)?;
-                    let Some((idx, stfield)) = stdef
-                        .fields
-                        .iter()
-                        .enumerate()
-                        .find(|(_, field)| &field.name == fname)
+                    let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname)
                     else {
                         return Err(format!("Struct field {fname} not found"));
                     };
                     self.code.push(match ex {
-                        Type::I32 | Type::Str => OpCode::I32Store,
-                        _ => todo!(),
+                        Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Store,
+                        Type::I64 => OpCode::I64Store,
+                        Type::F32 => OpCode::F32Store,
+                        Type::F64 => OpCode::F64Store,
+                        Type::Void => {
+                            return Err(format!("Struct field {} has a void type", stfield.name))
+                        }
                     } as u8);
                     encode_leb128(&mut self.code, 0).unwrap();
-                    encode_leb128(&mut self.code, (idx * std::mem::size_of::<u32>()) as u32)
-                        .unwrap();
+                    encode_leb128(&mut self.code, stfield.offset as u32).unwrap();
+                    println!("field {fname}: offset {offset}", offset = stfield.offset);
                 }
 
                 self.local_get(ptr);
@@ -535,12 +544,7 @@ impl<'a> Compiler<'a> {
                 let Some(stdef) = self.structs.get(&stname) else {
                     return Err(format!("Struct {stname} not found"));
                 };
-                let Some((idx, stfield)) = stdef
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .find(|(_, field)| &field.name == fname)
-                else {
+                let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname) else {
                     return Err(format!("Struct field {fname} not found"));
                 };
                 self.code.push(match stfield.ty {
@@ -551,7 +555,7 @@ impl<'a> Compiler<'a> {
                     Type::Void => return Ok(Type::Void),
                 } as u8);
                 encode_leb128(&mut self.code, 0).unwrap();
-                encode_leb128(&mut self.code, (idx * std::mem::size_of::<u32>()) as u32).unwrap();
+                encode_leb128(&mut self.code, stfield.offset as u32).unwrap();
                 Ok(stfield.ty.clone())
             }
             Expression::Neg(ex) => {
@@ -1097,7 +1101,8 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}local.set {arg}")?;
             }
-            I32Store | I32Store8 | I32Load | I32Load8S | I64Load | F32Load | F64Load => {
+            I32Store | I64Store | F32Store | F64Store | I32Store8 | I64Store8 | I32Load
+            | I32Load8S | I64Load | F32Load | F64Load => {
                 let mem = decode_leb128(&mut cur)?;
                 let align = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}{} {mem} {align}", code.to_name())?;

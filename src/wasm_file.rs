@@ -3,8 +3,8 @@ use crate::{
     compiler::{disasm_func, encode_leb128, Compiler, OpCode},
     const_table::ConstTable,
     infer::{run_type_infer, set_infer_debug},
-    model::{FuncDef, FuncImport, FuncType},
-    parser::{parse, FnDecl, Statement, StructDef},
+    model::{FuncDef, FuncImport, FuncType, StructDef},
+    parser::{parse, FnDecl, Statement},
     Type,
 };
 use std::{collections::HashMap, error::Error, io::Write};
@@ -320,17 +320,17 @@ fn codegen(
     Ok((funcs, const_table))
 }
 
-fn get_structs<'src>(stmts: &[Statement<'src>]) -> CompileResult<HashMap<String, StructDef<'src>>> {
+fn get_structs<'src>(stmts: &[Statement<'src>]) -> CompileResult<HashMap<String, StructDef>> {
     let mut structs = HashMap::new();
 
     fn find_structs<'a, 'src: 'a>(
         stmts: &'a [Statement<'src>],
-        structs: &mut HashMap<String, StructDef<'src>>,
+        structs: &mut HashMap<String, StructDef>,
     ) {
         for stmt in stmts {
             match stmt {
-                Statement::Struct(stdef) => {
-                    structs.insert(stdef.name.to_string(), stdef.clone());
+                Statement::Struct(stdecl) => {
+                    structs.insert(stdecl.name.to_string(), stdecl.into());
                 }
                 Statement::Brace(stmts) => find_structs(stmts, structs),
                 Statement::FnDecl(fn_decl) => find_structs(&fn_decl.stmts, structs),
@@ -569,4 +569,37 @@ fn write_string(f: &mut impl Write, s: &str) -> std::io::Result<()> {
     encode_leb128(f, s.len() as u32)?;
     f.write_all(s.as_bytes())?;
     Ok(())
+}
+
+pub fn default_types() -> Vec<FuncType> {
+    vec![
+        FuncType {
+            params: vec![Type::I32],
+            results: vec![Type::I32],
+        },
+        FuncType {
+            params: vec![Type::F64],
+            results: vec![Type::Str],
+        },
+    ]
+}
+
+pub fn default_imports() -> Vec<FuncImport> {
+    vec![
+        FuncImport {
+            module: "console".to_string(),
+            name: "log".to_string(),
+            ty: 0,
+        },
+        FuncImport {
+            module: "output".to_string(),
+            name: "putc".to_string(),
+            ty: 0,
+        },
+        FuncImport {
+            module: "js".to_string(),
+            name: "format_f64".to_string(),
+            ty: 1,
+        },
+    ]
 }

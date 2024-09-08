@@ -8,6 +8,9 @@ const opts = {
         putc: c => {
             outputBuf += String.fromCharCode(c);
         }
+    },
+    js: {
+        format_f64: v => addStringToWasm(`${v}`),
     }
 };
 

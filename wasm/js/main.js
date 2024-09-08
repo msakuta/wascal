@@ -152,7 +152,7 @@ const samples = document.getElementById("samples");
     "hello.wscl", "fact.wscl", "fibo.wscl", "float.wscl",
     "funcs.wscl", "log.wscl", "loop.wscl",
     "string.wscl", "strrepeat.wscl",
-    "struct.wscl", "struct_infer.wscl",
+    "struct.wscl", "struct_infer.wscl", "vector.wscl",
     "mandel.wscl",
     "canvas.wscl", "mandel_canvas.wscl",
 ]
