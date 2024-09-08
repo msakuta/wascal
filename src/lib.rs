@@ -1,6 +1,7 @@
 mod compiler;
 mod const_table;
 mod infer;
+mod leb128;
 mod model;
 mod parser;
 mod wasm_file;

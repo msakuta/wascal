@@ -135,8 +135,11 @@ impl<'a> TypeInferer<'a> {
                 let rhs_ty = self.forward_type_expr(rhs)?;
                 Ok(lhs_ty & rhs_ty)
             }
-            Expression::Lt(_, _) | Expression::Gt(_, _) => {
-                // Relation operators always return i32 (boolean)
+            Expression::Lt(_, _)
+            | Expression::Gt(_, _)
+            | Expression::And(_, _)
+            | Expression::Or(_, _) => {
+                // Relation and logical operators always return i32 (boolean)
                 Ok(Type::I32.into())
             }
             Expression::Conditional(_, t_branch, f_branch) => {
@@ -213,6 +216,10 @@ impl<'a> TypeInferer<'a> {
                     // (Some(lhs), Some(rhs)) => {}
                     _ => {}
                 }
+            }
+            Expression::And(lhs, rhs) | Expression::Or(lhs, rhs) => {
+                self.propagate_type_expr(lhs, &Type::I32.into())?;
+                self.propagate_type_expr(rhs, &Type::I32.into())?;
             }
             Expression::Conditional(cond, t_branch, f_branch) => {
                 self.propagate_type_expr(cond, &Type::I32.into())?;
@@ -305,6 +312,8 @@ impl<'a> TypeInferer<'a> {
             | Expression::Div(_, _)
             | Expression::Lt(_, _)
             | Expression::Gt(_, _)
+            | Expression::And(_, _)
+            | Expression::Or(_, _)
             | Expression::Conditional(_, _, _) => {
                 Err("Arithmetic expression cannot be a lvalue".to_string())
             }

@@ -72,24 +72,37 @@ impl<'a> Compiler<'a> {
         let start_addr = self.add_local("", Type::I32); // []
 
         self.i32const(0); // [0]
-                          // self.local_get(stashed); // [0, stashed]
 
         // Round the length up to 4 bytes for the next allocation
         self.local_get(stashed);
         self.i32const(ALLOC_ALIGN - 1);
         self.code.push(OpCode::I32Add as u8);
         self.i32const(ALLOC_ALIGN);
-        self.code.push(OpCode::I32DivS as u8);
+        self.code.push(OpCode::I32DivU as u8);
         self.i32const(ALLOC_ALIGN);
-        self.code.push(OpCode::I32Mul as u8);
-        // self.i32and(!(0x3));
+        self.code.push(OpCode::I32Mul as u8); // [0, rounded_size = (stashed - 3) / 4 * 4]
+        self.local_get(start_addr); // [0, rounded_size, start_addr]
+        self.code.push(OpCode::I32Add as u8); // [0, new_size = rounded_size + start_addr]
+        let new_size = self.add_local("", Type::I32);
 
-        self.i32const(0); // [0, stashed, 0]
-        self.i32load(0)?; // [0, stashed, mem[0]]
+        self.local_get(new_size);
+        self.i32store(0)?;
 
-        self.code.push(OpCode::I32Add as u8); // [0, stashed + mem[0]]
-
-        self.i32store(0)?; // []
+        self.local_get(new_size);
+        self.i32const(65536);
+        self.code.push(OpCode::I32DivU as u8);
+        self.code.push(OpCode::MemorySize as u8);
+        self.code.push(0);
+        self.code.push(OpCode::I32GeU as u8);
+        self.code.push(OpCode::If as u8);
+        self.code.push(Type::Void.code());
+        self.local_get(new_size);
+        self.i32const(65536);
+        self.code.push(OpCode::I32DivS as u8);
+        self.code.push(OpCode::MemoryGrow as u8);
+        self.code.push(0);
+        self.code.push(OpCode::Drop as u8);
+        self.code.push(OpCode::End as u8);
 
         Ok(start_addr)
     }

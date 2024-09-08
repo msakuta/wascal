@@ -17,6 +17,8 @@ pub enum Expression<'src> {
     Div(Box<Expression<'src>>, Box<Expression<'src>>),
     Lt(Box<Expression<'src>>, Box<Expression<'src>>),
     Gt(Box<Expression<'src>>, Box<Expression<'src>>),
+    And(Box<Expression<'src>>, Box<Expression<'src>>),
+    Or(Box<Expression<'src>>, Box<Expression<'src>>),
     Conditional(
         Box<Expression<'src>>,
         Vec<Statement<'src>>,
@@ -403,6 +405,25 @@ fn cmp_expr(i: &str) -> IResult<&str, Expression> {
     ))
 }
 
+fn logical_expr(i: &str) -> IResult<&str, Expression> {
+    let (r, lhs) = cmp_expr(i)?;
+
+    let Ok((r, op)) = recognize("&&")(space(r)).or_else(|_| recognize("||")(space(r))) else {
+        return Ok((r, lhs));
+    };
+
+    let (r, rhs) = cmp_expr(r)?;
+
+    Ok((
+        r,
+        if op == "&&" {
+            Expression::And(Box::new(lhs), Box::new(rhs))
+        } else {
+            Expression::Or(Box::new(lhs), Box::new(rhs))
+        },
+    ))
+}
+
 fn else_clause(i: &str) -> IResult<&str, Vec<Statement>> {
     let (r, _) = recognize("else")(space(i))?;
 
@@ -419,7 +440,7 @@ fn else_clause(i: &str) -> IResult<&str, Vec<Statement>> {
 fn conditional(i: &str) -> IResult<&str, Expression> {
     let (r, _) = recognize("if")(space(i))?;
 
-    let (r, ex) = cmp_expr(r)?;
+    let (r, ex) = logical_expr(r)?;
 
     let (r, _) = recognize("{")(space(r))?;
 
@@ -440,7 +461,7 @@ fn expression(i: &str) -> IResult<&str, Expression> {
         return Ok((r, res));
     }
 
-    if let Ok((r, res)) = cmp_expr(i) {
+    if let Ok((r, res)) = logical_expr(i) {
         return Ok((r, res));
     }
 
@@ -728,12 +749,14 @@ pub fn format_expr(
             format_expr(ex, level, f)?;
             Ok(())
         }
-        Expression::Add(lhs, rhs) => format_bin_op('+', lhs, rhs, level, f),
-        Expression::Sub(lhs, rhs) => format_bin_op('-', lhs, rhs, level, f),
-        Expression::Mul(lhs, rhs) => format_bin_op('*', lhs, rhs, level, f),
-        Expression::Div(lhs, rhs) => format_bin_op('/', lhs, rhs, level, f),
-        Expression::Lt(lhs, rhs) => format_bin_op('<', lhs, rhs, level, f),
-        Expression::Gt(lhs, rhs) => format_bin_op('>', lhs, rhs, level, f),
+        Expression::Add(lhs, rhs) => format_bin_op("+", lhs, rhs, level, f),
+        Expression::Sub(lhs, rhs) => format_bin_op("-", lhs, rhs, level, f),
+        Expression::Mul(lhs, rhs) => format_bin_op("*", lhs, rhs, level, f),
+        Expression::Div(lhs, rhs) => format_bin_op("/", lhs, rhs, level, f),
+        Expression::Lt(lhs, rhs) => format_bin_op("<", lhs, rhs, level, f),
+        Expression::Gt(lhs, rhs) => format_bin_op(">", lhs, rhs, level, f),
+        Expression::And(lhs, rhs) => format_bin_op("&&", lhs, rhs, level, f),
+        Expression::Or(lhs, rhs) => format_bin_op("||", lhs, rhs, level, f),
         Expression::Conditional(cond, t_branch, f_branch) => {
             let indent = "  ".repeat(level);
             write!(f, "if ")?;
@@ -756,7 +779,7 @@ pub fn format_expr(
 }
 
 fn format_bin_op(
-    op: char,
+    op: &str,
     lhs: &Expression,
     rhs: &Expression,
     level: usize,

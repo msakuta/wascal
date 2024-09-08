@@ -3,15 +3,14 @@ mod emit;
 mod malloc;
 mod reverse;
 mod set;
+mod sqrt;
 mod strcat;
 
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-};
+use std::{collections::HashMap, io::Write};
 
 use crate::{
     const_table::ConstTable,
+    leb128::{encode_leb128, encode_sleb128},
     model::{FuncDef, FuncImport, FuncType, StructDef, Type},
     parser::{Expression, For, Statement, VarDecl},
 };
@@ -43,6 +42,8 @@ pub(crate) enum OpCode {
     F64Store = 0x39,
     I32Store8 = 0x3a,
     I64Store8 = 0x3c,
+    MemorySize = 0x3f,
+    MemoryGrow = 0x40,
     I32Const = 0x41,
     I64Const = 0x42,
     F32Const = 0x43,
@@ -75,17 +76,21 @@ pub(crate) enum OpCode {
     I32Sub = 0x6b,
     I32Mul = 0x6c,
     I32DivS = 0x6d,
+    I32DivU = 0x6e,
     I32And = 0x71,
+    I32Or = 0x72,
     I64Add = 0x7c,
     I64Sub = 0x7d,
     I64Mul = 0x7e,
     I64DivS = 0x7f,
     F32Neg = 0x8c,
+    F32Sqrt = 0x91,
     F32Add = 0x92,
     F32Sub = 0x93,
     F32Mul = 0x94,
     F32Div = 0x95,
     F64Neg = 0x9a,
+    F64Sqrt = 0x9f,
     F64Add = 0xa0,
     F64Sub = 0xa1,
     F64Mul = 0xa2,
@@ -144,6 +149,8 @@ impl_op_from!(
     F64Store: "f64.store",
     I32Store8: "i32.store8",
     I64Store8: "i64.store8",
+    MemorySize: "memory.size",
+    MemoryGrow: "memory.grow",
     I32Const: "i32.const",
     I64Const: "i64.const",
     F32Const: "f32.const",
@@ -176,13 +183,19 @@ impl_op_from!(
     I32Sub: "i32.sub",
     I32Mul: "i32.mul",
     I32DivS: "i32.div_s",
+    I32DivU: "i32.div_u",
     I32And: "i32.and",
+    I32Or: "i32.or",
     I64Add: "i64.add",
     I64Sub: "i64.sub",
     I64Mul: "i64.mul",
     I64DivS: "i64.div_s",
-    F32Neg: "f32.neg", F32Add: "f32.add", F32Sub: "f32.sub", F32Mul: "f32.mul", F32Div: "f32.div",
-    F64Neg: "f64.neg", F64Add: "f64.add", F64Sub: "f64.sub", F64Mul: "f64.mul", F64Div: "f64.div",
+    F32Neg: "f32.neg",
+    F32Sqrt: "f32.sqrt",
+    F32Add: "f32.add", F32Sub: "f32.sub", F32Mul: "f32.mul", F32Div: "f32.div",
+    F64Neg: "f64.neg",
+    F64Sqrt: "f64.sqrt",
+    F64Add: "f64.add", F64Sub: "f64.sub", F64Mul: "f64.mul", F64Div: "f64.div",
     I32WrapI64: "i32.wrap_i64",
     I32TruncF32S: "i32.trunc_f32_s",
     I32TruncF64S: "i32.trunc_f32_s",
@@ -565,6 +578,20 @@ impl<'a> Compiler<'a> {
                     st: None,
                 },
             ),
+            Expression::And(lhs, rhs) => {
+                // TODO: short-circuit
+                self.emit_expr(lhs)?;
+                self.emit_expr(rhs)?;
+                self.code.push(OpCode::I32And as u8);
+                Ok(Type::I32)
+            }
+            Expression::Or(lhs, rhs) => {
+                // TODO: short-circuit
+                self.emit_expr(lhs)?;
+                self.emit_expr(rhs)?;
+                self.code.push(OpCode::I32Or as u8);
+                Ok(Type::I32)
+            }
             Expression::Conditional(cond, t_branch, f_branch) => {
                 self.emit_expr(cond)?;
                 self.code.push(OpCode::If as u8);
@@ -650,6 +677,8 @@ impl<'a> Compiler<'a> {
             | Expression::Div(_, _)
             | Expression::Lt(_, _)
             | Expression::Gt(_, _)
+            | Expression::And(_, _)
+            | Expression::Or(_, _)
             | Expression::Conditional(_, _, _) => {
                 Err("Arithmetic expression cannot be a lvalue".to_string())
             }
@@ -756,7 +785,7 @@ impl<'a> Compiler<'a> {
             Statement::Expr(ex) => self.emit_expr(ex),
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.emit_expr(ex)?;
-                let ty = ty.determine().unwrap();
+                let ty = ty.determine().expect("type should be determinable");
                 self.coerce_type(&ty, &ex_ty).map_err(|_| {
                     format!(
                         "Variable declared type {ty} and initializer type {ex_ty} are different"
@@ -955,85 +984,4 @@ impl<'a> Compiler<'a> {
         self.code.push(OpCode::End as u8);
         Ok(())
     }
-}
-
-pub(crate) fn encode_leb128(f: &mut impl Write, value: u32) -> std::io::Result<()> {
-    let mut value = value as u32;
-    loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-        }
-        f.write_all(&[byte])?;
-        if value == 0 {
-            return Ok(());
-        }
-    }
-}
-
-#[test]
-fn test_leb128() {
-    let mut v = vec![];
-    encode_leb128(&mut v, 256).unwrap();
-    assert_eq!(v, vec![0x80, 0x02]);
-}
-
-pub(crate) fn encode_sleb128(f: &mut impl Write, value: impl Into<i64>) -> std::io::Result<()> {
-    let mut value = value.into();
-    let mut more = true;
-    while more {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if (value == 0 && byte & 0x40 == 0) || (value == -1 && byte & 0x40 != 0) {
-            more = false;
-        } else {
-            byte |= 0x80;
-        }
-        f.write_all(&[byte])?;
-    }
-    return Ok(());
-}
-
-#[test]
-fn test_sleb128() {
-    let mut v = vec![];
-    encode_sleb128(&mut v, -123456).unwrap();
-    assert_eq!(v, vec![0xc0, 0xbb, 0x78]);
-    assert_eq!(
-        decode_sleb128(&mut std::io::Cursor::new(&v)).unwrap(),
-        -123456
-    );
-}
-
-pub(crate) fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
-    let mut value = 0u32;
-    let mut shift = 0;
-    loop {
-        let mut byte = [0u8];
-        f.read_exact(&mut byte)?;
-        value |= ((byte[0] & 0x7f) as u32) << shift;
-        if byte[0] & 0x80 == 0 {
-            return Ok(value as i32);
-        }
-        shift += 7;
-    }
-}
-
-pub(crate) fn decode_sleb128(f: &mut impl Read) -> std::io::Result<i32> {
-    let mut value = 0u32;
-    let mut shift = 0;
-    let mut byte = [0u8];
-    loop {
-        f.read_exact(&mut byte)?;
-        value |= ((byte[0] & 0x7f) as u32) << shift;
-        shift += 7;
-        if byte[0] & 0x80 == 0 {
-            break;
-        }
-    }
-    if shift < std::mem::size_of::<i32>() * 8 && byte[0] & 0x40 != 0 {
-        value |= !0 << shift;
-    }
-    return Ok(value as i32);
 }

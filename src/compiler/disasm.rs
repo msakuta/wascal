@@ -1,8 +1,8 @@
 use std::io::{Read, Write};
 
-use super::{decode_leb128, decode_sleb128, OpCode};
+use super::OpCode;
 
-use crate::{model::FuncDef, FuncType, Type};
+use crate::{leb128::decode_leb128, model::FuncDef, FuncType, Type};
 
 pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
     use OpCode::*;
@@ -70,12 +70,16 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 let align = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}{} {mem} {align}", code.to_name())?;
             }
+            MemorySize | MemoryGrow => {
+                let arg = decode_leb128(&mut cur)?;
+                writeln!(f, "{indent}{code} {arg}", code = code.to_name())?;
+            }
             I32Const => {
-                let arg = decode_sleb128(&mut cur)?;
+                let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}i32.const {arg}")?;
             }
             I64Const => {
-                let arg = decode_sleb128(&mut cur)?;
+                let arg = decode_leb128(&mut cur)?;
                 writeln!(f, "{indent}i64.const {arg}")?;
             }
             F32Const => {
@@ -91,13 +95,13 @@ pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
                 writeln!(f, "{indent}f64.const {arg}")?;
             }
             I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS | I32GeU | I32Add
-            | I32Sub | I32Mul | I32DivS | I32And | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS
-            | I64LeU | I64GeS | I64GeU | I64Add | I64Sub | I64Mul | I64DivS | F32Neg | F32Lt
-            | F32Gt | F32Le | F32Ge | F32Add | F32Sub | F32Mul | F32Div | F64Neg | F64Lt
-            | F64Gt | F64Le | F64Ge | F64Add | F64Sub | F64Mul | F64Div | I32WrapI64
-            | I32TruncF32S | I32TruncF64S | I64ExtendI32S | I64TruncF32S | I64TruncF64S
-            | F32ConvertI32S | F32ConvertI64S | F32DemoteF64 | F64ConvertI32S | F64ConvertI64S
-            | F64PromoteF32 => {
+            | I32Sub | I32Mul | I32DivS | I32DivU | I32And | I32Or | I64LtS | I64LtU | I64GtS
+            | I64GtU | I64LeS | I64LeU | I64GeS | I64GeU | I64Add | I64Sub | I64Mul | I64DivS
+            | F32Neg | F32Sqrt | F32Lt | F32Gt | F32Le | F32Ge | F32Add | F32Sub | F32Mul
+            | F32Div | F64Neg | F64Sqrt | F64Lt | F64Gt | F64Le | F64Ge | F64Add | F64Sub
+            | F64Mul | F64Div | I32WrapI64 | I32TruncF32S | I32TruncF64S | I64ExtendI32S
+            | I64TruncF32S | I64TruncF64S | F32ConvertI32S | F32ConvertI64S | F32DemoteF64
+            | F64ConvertI32S | F64ConvertI64S | F64PromoteF32 => {
                 writeln!(f, "{indent}{}", code.to_name())?;
             }
             End => {

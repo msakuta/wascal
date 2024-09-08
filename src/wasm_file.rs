@@ -1,8 +1,9 @@
 //! Code to write wasm file format sections.
 use crate::{
-    compiler::{disasm_func, encode_leb128, Compiler, OpCode},
+    compiler::{disasm_func, Compiler, OpCode},
     const_table::ConstTable,
     infer::{run_type_infer, set_infer_debug},
+    leb128::encode_leb128,
     model::{FuncDef, FuncImport, FuncType, StructDef},
     parser::{parse, FnDecl, Statement},
     Type,
@@ -392,6 +393,15 @@ fn compile_std_lib(
         let func_ty = &types[reverse_ty];
 
         disasm_func(&funcs[reverse_fn], &func_ty, disasm_f)?;
+    }
+
+    let (sqrt_ty, sqrt_fn) = Compiler::compile_sqrt(types, imports, const_table, funcs)
+        .map_err(|e| CompileError::Compile(e))?;
+
+    if let Some(ref mut disasm_f) = disasm_f {
+        let func_ty = &types[sqrt_ty];
+
+        disasm_func(&funcs[sqrt_fn], &func_ty, disasm_f)?;
     }
 
     Ok(())

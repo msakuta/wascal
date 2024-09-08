@@ -154,7 +154,7 @@ const samples = document.getElementById("samples");
     "funcs.wscl", "log.wscl", "loop.wscl",
     "string.wscl", "strrepeat.wscl",
     "struct.wscl", "struct_infer.wscl", "struct_nested.wscl",
-    "vector.wscl", "field_assign.wscl",
+    "vector.wscl", "field_assign.wscl", "raytrace_canvas.wscl",
     "mandel.wscl",
     "canvas.wscl", "mandel_canvas.wscl",
 ]
