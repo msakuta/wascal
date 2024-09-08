@@ -694,7 +694,7 @@ impl<'a> Compiler<'a> {
                 }
             }
             (Type::Struct(_), Type::Struct(_)) => {
-                let dunder = dbg!(format!("__{name}__"));
+                let dunder = format!("__{name}__");
                 let (func_idx, func) = self
                     .funcs
                     .iter()
@@ -712,7 +712,7 @@ impl<'a> Compiler<'a> {
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, func_id as u32).map_err(|e| e.to_string())?;
 
-                return Ok(dbg!(func.ret_ty.clone()));
+                return Ok(func.ret_ty.clone());
             }
             _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
         };
