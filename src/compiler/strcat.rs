@@ -5,7 +5,7 @@ use crate::{const_table::ConstTable, model::FuncDef, parser::VarDecl, FuncImport
 use super::{encode_leb128, Compiler, OpCode};
 
 impl<'a> Compiler<'a> {
-    /// Define `set` standard library function, which sets a byte in the specified address of memory.
+    /// Define `strcat` standard library function, which concatenates 2 strings.
     pub fn compile_strcat(
         types: &mut Vec<FuncType>,
         imports: &[FuncImport],

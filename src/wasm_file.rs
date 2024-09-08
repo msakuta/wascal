@@ -90,7 +90,7 @@ pub fn compile_wasm(
 /// `module` flag indicates whether the output JS code should be a ES6 module or an IIFE.
 fn write_bind(bind: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io::Result<()> {
     // Include boilerplate code for binding
-    const HEADER: &str = include_str!("../header.js");
+    const HEADER: &str = include_str!("../template/header.js");
 
     if !module {
         writeln!(bind, "(function(){{\nconst module = {{}};")?;
@@ -376,6 +376,15 @@ fn compile_std_lib(
         let func_ty = &types[strcat_ty];
 
         disasm_func(&funcs[strcat_fn], &func_ty, disasm_f)?;
+    }
+
+    let (reverse_ty, reverse_fn) = Compiler::compile_reverse(types, imports, const_table, funcs)
+        .map_err(|e| CompileError::Compile(e))?;
+
+    if let Some(ref mut disasm_f) = disasm_f {
+        let func_ty = &types[reverse_ty];
+
+        disasm_func(&funcs[reverse_fn], &func_ty, disasm_f)?;
     }
 
     Ok(())

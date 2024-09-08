@@ -465,15 +465,20 @@ pub fn run_type_infer<'src>(
         );
     }
     for func in funcs {
-        let func_ty = &types[func.ty];
+        // let func_ty = dbg!(&types[func.ty]);
         type_infer_funcs.insert(
             func.name.clone(),
             TypeInferFn {
-                params: func_ty.params.clone(),
-                ret_ty: func_ty
-                    .results
-                    .get(0)
-                    .map_or_else(TypeSet::void, |f| f.clone().into()),
+                params: func.locals[..func.args]
+                    .iter()
+                    .map(|arg| arg.ty.clone().determine())
+                    .collect::<Option<_>>()
+                    .ok_or_else(|| {
+                        CompileError::Compile(
+                            "Function parameter types could not be determine".to_string(),
+                        )
+                    })?,
+                ret_ty: func.ret_ty.clone().into(),
             },
         );
     }

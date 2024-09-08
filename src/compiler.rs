@@ -1,6 +1,7 @@
-mod emit;
 mod disasm;
+mod emit;
 mod malloc;
+mod reverse;
 mod set;
 mod strcat;
 
@@ -299,66 +300,6 @@ impl<'a> Compiler<'a> {
         Ok(ret_ty)
     }
 
-    fn define_reverse(&mut self) -> Result<Type, String> {
-        // get length of the string
-        self.local_get(1);
-
-        let (malloc_id, _) = self.find_func("malloc")?;
-
-        // Allocate another chunk of memory with the same length
-        // let new_buf = self.bump()?;
-        self.code.push(OpCode::Call as u8);
-        encode_leb128(&mut self.code, malloc_id as u32).unwrap();
-        let new_buf = self.add_local("", Type::I32);
-
-        self.i32const(0);
-        let idx = self.add_local("", Type::I32);
-
-        self.emit_for_loop(idx, 1, Type::I32, |this| {
-            this.local_get(idx); // [idx]
-            this.local_get(0); // [idx, ptr]
-
-            this.code.push(OpCode::I32Add as u8); // [idx + ptr]
-
-            this.i32load8_s(4)?; // [mem[idx + ptr]]
-            let data = this.add_local("", Type::I32); // []
-
-            this.local_get(1); // [len]
-            this.local_get(idx); // [len, idx]
-            this.code.push(OpCode::I32Sub as u8); // [len - idx]
-            this.i32const(1); // [len - idx, 1]
-            this.code.push(OpCode::I32Sub as u8); // [len - idx - 1]
-            this.local_get(new_buf); // [len - idx - 1, new_buf]
-            this.code.push(OpCode::I32Add as u8); // [len - idx - 1 + new_buf]
-            this.local_get(data); // [len - idx + new_buf, mem[idx + ptr]]
-
-            this.i32store8(4)?; // []
-
-            Ok(())
-        })?;
-
-        // Allocate buffer to return string
-        self.i32const(8);
-        self.code.push(OpCode::Call as u8);
-        encode_leb128(&mut self.code, malloc_id as u32).unwrap();
-        let ret_buf = self.codegen_malloc()?;
-
-        // Write ptr
-        self.local_get(ret_buf);
-        self.local_get(new_buf);
-        self.i32store(4)?;
-
-        // Write length
-        self.local_get(ret_buf);
-        self.i32const(4);
-        self.code.push(OpCode::I32Add as u8);
-        self.local_get(1);
-        self.i32store(4)?;
-
-        self.local_get(ret_buf);
-        Ok(Type::I32)
-    }
-
     pub fn get_code(&self) -> &[u8] {
         &self.code
     }
@@ -455,7 +396,6 @@ impl<'a> Compiler<'a> {
                     } as u8);
                     encode_leb128(&mut self.code, 0).unwrap();
                     encode_leb128(&mut self.code, stfield.offset as u32).unwrap();
-                    println!("field {fname}: offset {offset}", offset = stfield.offset);
                 }
 
                 self.local_get(ptr);
@@ -475,7 +415,7 @@ impl<'a> Compiler<'a> {
             }
             Expression::FnInvoke(name, args) => {
                 let idx;
-                let fn_ty;
+                let ret_ty;
                 if let Some((i, import)) = self
                     .imports
                     .iter()
@@ -483,12 +423,16 @@ impl<'a> Compiler<'a> {
                     .find(|(_, f)| f.name == *name)
                 {
                     idx = i;
-                    fn_ty = import.ty;
+                    ret_ty = self.types[import.ty]
+                        .results
+                        .get(0)
+                        .cloned()
+                        .unwrap_or(Type::Void);
                 } else if let Some((i, func)) =
                     self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
                 {
                     idx = i + self.imports.len();
-                    fn_ty = func.ty;
+                    ret_ty = func.ret_ty.clone();
                 } else {
                     return Err(format!("Calling undefined function {}", name));
                 };
@@ -499,8 +443,7 @@ impl<'a> Compiler<'a> {
                 }
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, idx as u32).unwrap();
-                let fn_ty = &self.types[fn_ty];
-                Ok(fn_ty.results.get(0).cloned().unwrap_or(Type::Void))
+                Ok(ret_ty)
             }
             Expression::Cast(ex, ty) => {
                 let ex_ty = self.emit_expr(ex)?;

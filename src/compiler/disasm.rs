@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use super::{OpCode, decode_leb128, decode_sleb128};
+use super::{decode_leb128, decode_sleb128, OpCode};
 
 use crate::{model::FuncDef, FuncType, Type};
 

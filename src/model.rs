@@ -355,6 +355,7 @@ impl std::fmt::Display for TypeSet {
     }
 }
 
+#[derive(Debug)]
 pub struct FuncType {
     pub params: Vec<Type>,
     pub results: Vec<Type>,
