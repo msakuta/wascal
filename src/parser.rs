@@ -597,6 +597,7 @@ fn struct_def(i: &str) -> IResult<&str, Statement> {
     let mut fields = vec![];
     while let Ok((next_r, field)) = struct_field(r) {
         fields.push(field);
+        r = next_r;
         let Ok((next_r, _)) = recognize(",")(space(next_r)) else {
             break;
         };
