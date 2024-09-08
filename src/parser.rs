@@ -6,8 +6,10 @@ pub enum Expression<'src> {
     LiteralFloat(f64, TypeSet),
     StrLiteral(String),
     Variable(&'src str),
+    StructLiteral(&'src str, Vec<(&'src str, Expression<'src>)>),
     FnInvoke(&'src str, Vec<Expression<'src>>),
     Cast(Box<Expression<'src>>, Type),
+    FieldAccess(Box<Expression<'src>>, &'src str),
     Neg(Box<Expression<'src>>),
     Add(Box<Expression<'src>>, Box<Expression<'src>>),
     Sub(Box<Expression<'src>>, Box<Expression<'src>>),
@@ -25,12 +27,13 @@ pub enum Expression<'src> {
 #[derive(Debug, PartialEq)]
 pub enum Statement<'src> {
     VarDecl(&'src str, TypeSet, Expression<'src>),
-    VarAssign(&'src str, Expression<'src>),
+    VarAssign(Expression<'src>, Expression<'src>),
     Expr(Expression<'src>),
     FnDecl(FnDecl<'src>),
     For(For<'src>),
     Brace(Vec<Statement<'src>>),
     Return(Option<Expression<'src>>),
+    Struct(StructDecl<'src>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -59,6 +62,18 @@ pub struct For<'src> {
     pub(crate) stmts: Vec<Statement<'src>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField<'src> {
+    pub(crate) name: &'src str,
+    pub(crate) ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructDecl<'src> {
+    pub(crate) name: &'src str,
+    pub(crate) fields: Vec<StructField<'src>>,
+}
+
 type IResult<R, T> = Result<(R, T), String>;
 
 fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
@@ -73,13 +88,13 @@ fn num_literal(mut input: &str) -> Result<(&str, Expression), String> {
             let num = slice.parse::<f64>().map_err(|s| s.to_string())?;
             Ok((
                 input,
-                Expression::LiteralFloat(num, TypeSet::F32 | TypeSet::F64),
+                Expression::LiteralFloat(num, TypeSet::f32() | TypeSet::f64()),
             ))
         } else {
             let num = slice.parse::<i64>().map_err(|s| s.to_string())?;
             Ok((
                 input,
-                Expression::LiteralInt(num, TypeSet::I32 | TypeSet::I64),
+                Expression::LiteralInt(num, TypeSet::i32() | TypeSet::i64()),
             ))
         }
     } else {
@@ -121,7 +136,7 @@ fn test_uneg() {
         num_literal("-2.5"),
         Ok((
             "",
-            Expression::LiteralFloat(-2.5, TypeSet::F32 | TypeSet::F64)
+            Expression::LiteralFloat(-2.5, TypeSet::f32() | TypeSet::f64())
         ))
     );
 }
@@ -214,10 +229,49 @@ fn test_fn_call() {
     );
 }
 
-fn postfix_as<'a>(expr: Expression<'a>, i: &'a str) -> IResult<&'a str, Expression<'a>> {
-    if let Ok((r, _)) = space1(i).and_then(|r| recognize("as")(r)) {
-        let (r, ty) = identifier(space1(r)?)?;
-        return Ok((r, Expression::Cast(Box::new(expr), Type::try_from(ty)?)));
+fn struct_literal<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Expression<'a>> {
+    let (mut r, _) = recognize("{")(space(i))?;
+
+    let mut fields = vec![];
+    loop {
+        let Ok((next_r, fname)) = identifier(space(r)) else {
+            break;
+        };
+        let (next_r, _) = recognize(":")(space(next_r))?;
+        let (next_r, initializer) = expression(next_r)?;
+        fields.push((fname, initializer));
+        r = space(next_r);
+        let Ok((next_r, _)) = recognize(",")(r) else {
+            break;
+        };
+        r = space(next_r);
+    }
+
+    let Ok((r, _)) = recognize("}")(r) else {
+        return Err("FnInvoke is not closed".to_string());
+    };
+    return Ok((r, Expression::StructLiteral(name, fields)));
+}
+
+fn postfix_as<'a>(i: &'a str) -> IResult<&'a str, Type> {
+    let (r, _) = space1(i).and_then(|r| recognize("as")(r))?;
+    let (r, ty) = identifier(space1(r)?)?;
+    Ok((r, Type::try_from(ty)?))
+}
+
+fn postfix_dot<'a>(i: &'a str) -> IResult<&'a str, &'a str> {
+    let (r, _) = recognize(".")(space(i))?;
+    let (r, field) = identifier(space(r))?;
+    Ok((r, field))
+}
+
+fn postfix_expr<'a>(expr: Expression<'a>, i: &'a str) -> IResult<&'a str, Expression<'a>> {
+    if let Ok((r, p_as)) = postfix_as(i) {
+        return Ok((r, Expression::Cast(Box::new(expr), p_as)));
+    }
+
+    if let Ok((r, p_dot)) = postfix_dot(i) {
+        return postfix_expr(Expression::FieldAccess(Box::new(expr), p_dot), r);
     }
 
     Ok((i, expr))
@@ -242,18 +296,22 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     if let Ok((r, _)) = recognize("(")(r) {
         let (r, ex) = expression(r)?;
         let (r, _) = recognize(")")(r)?;
-        return postfix_as(ex, r);
+        return postfix_expr(ex, r);
     }
 
     let Ok((r, name)) = identifier(r) else {
         return Err("Factor is neither a numeric literal or an identifier".to_string());
     };
 
-    if let Ok((r, ex)) = fn_call(name, r) {
-        return postfix_as(ex, r);
+    if let Ok((r, ex)) = struct_literal(name, r) {
+        return postfix_expr(ex, r);
     }
 
-    postfix_as(Expression::Variable(name), r)
+    if let Ok((r, ex)) = fn_call(name, r) {
+        return postfix_expr(ex, r);
+    }
+
+    postfix_expr(Expression::Variable(name), r)
 }
 
 fn mul(i: &str) -> Result<(&str, Expression), String> {
@@ -411,13 +469,13 @@ fn for_stmt(i: &str) -> IResult<&str, Statement> {
 }
 
 fn var_assign(i: &str) -> IResult<&str, Statement> {
-    let (r, name) = identifier(space(i))?;
+    let (r, lhs) = expression(space(i))?;
     let (r, _) = recognize("=")(space(r))?;
     let (r, ex) = expression(space(r))?;
     if let Ok((r, _)) = recognize(";")(space(r)) {
-        return Ok((r, Statement::VarAssign(name, ex)));
+        return Ok((r, Statement::VarAssign(lhs, ex)));
     }
-    Ok((r, Statement::VarAssign(name, ex)))
+    Ok((r, Statement::VarAssign(lhs, ex)))
 }
 
 fn decl_ty(i: &str) -> IResult<&str, Type> {
@@ -431,7 +489,7 @@ fn fn_param(i: &str) -> IResult<&str, VarDecl> {
     let (r, ty) = if let Ok((r, ty)) = decl_ty(space(r)) {
         (r, ty.into())
     } else {
-        (r, TypeSet::ALL)
+        (r, TypeSet::all())
     };
     Ok((
         r,
@@ -481,7 +539,8 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
             );
         };
 
-        let (r, ret_ty) = fn_ret_ty(r).map_or((r, TypeSet::ALL), |(r, ty)| (r, TypeSet::from(ty)));
+        let (r, ret_ty) =
+            fn_ret_ty(r).map_or((r, TypeSet::all()), |(r, ty)| (r, TypeSet::from(ty)));
 
         let Ok((r, _)) = recognize("=")(space(r)) else {
             return Err("Syntax error in func decl: = could not be found".to_string());
@@ -501,7 +560,7 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
         ));
     }
 
-    let (r, ty) = decl_ty(r).map_or((r, TypeSet::ALL), |(r, ty)| (r, ty.into()));
+    let (r, ty) = decl_ty(r).map_or((r, TypeSet::all()), |(r, ty)| (r, ty.into()));
 
     let Ok((r, _)) = recognize("=")(space(r)) else {
         return Err("Syntax error in var decl".to_string());
@@ -511,6 +570,43 @@ fn let_binding(i: &str) -> IResult<&str, Statement> {
         return Ok((r, Statement::VarDecl(name, ty, ex)));
     }
     return Ok((r, Statement::VarDecl(name, ty, ex)));
+}
+
+/// The difference from [`fn_param`] is that the type is not optional.
+fn struct_field(i: &str) -> IResult<&str, StructField> {
+    let (r, field_name) = identifier(space(i))?;
+    let (r, ty) = decl_ty(space(r))?;
+    Ok((
+        r,
+        StructField {
+            name: field_name,
+            ty,
+        },
+    ))
+}
+
+fn struct_def(i: &str) -> IResult<&str, Statement> {
+    let (r, "struct") = identifier(space(i))? else {
+        return Err("Ident `struct` expected".to_string());
+    };
+
+    let (r, name) = identifier(space(r))?;
+
+    let (mut r, _) = recognize("{")(space(r))?;
+
+    let mut fields = vec![];
+    while let Ok((next_r, field)) = struct_field(r) {
+        fields.push(field);
+        r = next_r;
+        let Ok((next_r, _)) = recognize(",")(space(next_r)) else {
+            break;
+        };
+        r = next_r;
+    }
+
+    let (r, _) = recognize("}")(space(r))?;
+
+    Ok((r, Statement::Struct(StructDecl { name, fields })))
 }
 
 fn statement(i: &str) -> Result<(&str, Statement), String> {
@@ -528,6 +624,10 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
         let (r, ex) = expression(r).map_or((r, None), |(r, ex)| (r, Some(ex)));
         let (r, _) = recognize(";")(space(r)).unwrap_or((r, ""));
         return Ok((r, Statement::Return(ex)));
+    }
+
+    if let Ok((r, stdef)) = struct_def(space(r)) {
+        return Ok((r, stdef));
     }
 
     if let Ok(res) = let_binding(r) {
@@ -592,6 +692,16 @@ pub fn format_expr(
         Expression::LiteralInt(num, ts) => write!(f, "{num}: {ts}"),
         Expression::StrLiteral(s) => write!(f, "\"{s}\""), // TODO: escape
         Expression::Variable(name) => write!(f, "{name}"),
+        Expression::StructLiteral(name, fields) => {
+            let indent = "  ".repeat(level);
+            writeln!(f, "{name} {{")?;
+            for field in fields {
+                write!(f, "{indent}  {}: ", field.0)?;
+                format_expr(&field.1, level, f)?;
+                writeln!(f, ",")?;
+            }
+            write!(f, "{indent}}}")
+        }
         Expression::FnInvoke(fname, args) => {
             write!(f, "{fname}(")?;
             for (i, arg) in args.iter().enumerate() {
@@ -606,6 +716,11 @@ pub fn format_expr(
         Expression::Cast(ex, ty) => {
             format_expr(ex, level, f)?;
             write!(f, " as {ty}")?;
+            Ok(())
+        }
+        Expression::FieldAccess(ex, field) => {
+            format_expr(ex, level, f)?;
+            write!(f, ".{field}")?;
             Ok(())
         }
         Expression::Neg(ex) => {
@@ -667,8 +782,10 @@ pub fn format_stmt(
             format_expr(init, level, f)?;
             writeln!(f, ";")
         }
-        Statement::VarAssign(name, ex) => {
-            write!(f, "{indent}{name} = ")?;
+        Statement::VarAssign(lhs, ex) => {
+            write!(f, "{indent}")?;
+            format_expr(lhs, level, f)?;
+            write!(f, " = ")?;
             format_expr(ex, level, f)?;
             writeln!(f, ";")
         }
@@ -713,6 +830,13 @@ pub fn format_stmt(
                 format_expr(ex, level, f)?;
             }
             writeln!(f, ";")
+        }
+        Statement::Struct(stdef) => {
+            writeln!(f, "{indent}struct {} {{", stdef.name)?;
+            for field in &stdef.fields {
+                writeln!(f, "{indent}  {}: {},", field.name, field.ty)?;
+            }
+            writeln!(f, "{indent}}}")
         }
     }
 }

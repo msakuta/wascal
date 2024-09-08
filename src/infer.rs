@@ -3,7 +3,7 @@
 use std::{collections::HashMap, io::Write};
 
 use crate::{
-    model::{FuncDef, TypeSet},
+    model::{FuncDef, StructDef, TypeSet},
     parser::{format_stmt, Expression, Statement},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
@@ -54,7 +54,7 @@ fn get_type_infer_fns(
                         .iter()
                         .map(|p| p.ty.determine().ok_or_else(|| "Parameter requires a type"))
                         .collect::<Result<_, _>>()?,
-                    ret_ty: fn_decl.ret_ty,
+                    ret_ty: fn_decl.ret_ty.clone(),
                 },
             );
         }
@@ -67,33 +67,65 @@ struct TypeInferer<'a> {
     ret_ty: TypeSet,
     funcs: &'a HashMap<String, TypeInferFn>,
     locals: HashMap<String, TypeSet>,
+    structs: &'a HashMap<String, StructDef>,
 }
 
 impl<'a> TypeInferer<'a> {
-    pub fn new(ret_ty: TypeSet, funcs: &'a HashMap<String, TypeInferFn>) -> Self {
+    pub fn new(
+        ret_ty: TypeSet,
+        funcs: &'a HashMap<String, TypeInferFn>,
+        structs: &'a HashMap<String, StructDef>,
+    ) -> Self {
         Self {
             ret_ty,
             funcs,
             locals: HashMap::new(),
+            structs,
         }
     }
 
     pub fn forward_type_expr(&mut self, ex: &Expression) -> Result<TypeSet, String> {
         match ex {
-            Expression::LiteralInt(_, ts) => Ok(*ts),
-            Expression::LiteralFloat(_, ts) => Ok(*ts),
+            Expression::LiteralInt(_, ts) => Ok(ts.clone()),
+            Expression::LiteralFloat(_, ts) => Ok(ts.clone()),
             Expression::StrLiteral(_) => Ok(Type::Str.into()),
+            Expression::StructLiteral(name, _) => {
+                if self.structs.get(*name).is_none() {
+                    return Err(format!("Struct {name} was not found"));
+                }
+                Ok(Type::Struct(name.to_string()).into())
+            }
             Expression::Variable(name) => Ok(self
                 .locals
                 .get(*name)
-                .copied()
+                .cloned()
                 .unwrap_or(TypeSet::default())),
             Expression::FnInvoke(name, _) => self
                 .funcs
                 .get(*name)
-                .map(|f| f.ret_ty)
+                .map(|f| f.ret_ty.clone())
                 .ok_or_else(|| format!("Function {name} not found")),
-            Expression::Cast(_ex, ty) => Ok((*ty).into()),
+            Expression::Cast(_ex, ty) => Ok(ty.clone().into()),
+            Expression::FieldAccess(ex, fname) => {
+                let prefix_ty = self
+                    .forward_type_expr(ex)?
+                    .determine()
+                    .ok_or_else(|| "Struct could not be determined".to_string())?;
+                if let Type::Struct(stname) = prefix_ty {
+                    let Some(stdef) = self.structs.get(&stname) else {
+                        return Err(format!("Struct {stname} not defined"));
+                    };
+
+                    let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname)
+                    else {
+                        return Err(format!("Struct field {fname} not found"));
+                    };
+
+                    Ok(stfield.ty.clone().into())
+                } else {
+                    Err("Field access operator (.) is applied to a non-struct".to_string())
+                }
+            }
             Expression::Neg(ex) => self.forward_type_expr(ex),
             Expression::Add(lhs, rhs)
             | Expression::Sub(lhs, rhs)
@@ -123,16 +155,27 @@ impl<'a> TypeInferer<'a> {
 
     fn propagate_type_expr(&mut self, ex: &mut Expression, ts: &TypeSet) -> Result<(), String> {
         match ex {
-            Expression::LiteralInt(_, target_ts) => *target_ts = *ts,
-            Expression::LiteralFloat(_, target_ts) => *target_ts = *ts,
+            Expression::LiteralInt(_, target_ts) => *target_ts = ts.clone(),
+            Expression::LiteralFloat(_, target_ts) => *target_ts = ts.clone(),
             Expression::StrLiteral(_) => {}
+            Expression::StructLiteral(name, fields) => {
+                if let Some(stdef) = self.structs.get(*name) {
+                    for ((_, ex), stfield) in fields.iter_mut().zip(stdef.fields.iter()) {
+                        self.propagate_type_expr(ex, &stfield.ty.clone().into())?;
+                    }
+                } else {
+                    return Err(format!("Undefined struct {name}"));
+                }
+            }
             Expression::Variable(name) => {
                 if let Some(var) = self.locals.get_mut(*name) {
                     dprintln!("propagate variable {name}: {var} -> {ts}");
-                    if (*var & *ts).is_none() {
+                    let im_var: &TypeSet = var;
+                    let intersection = im_var & ts;
+                    if intersection.is_none() {
                         return Err(format!("Type inference failed to find intersection of type of variable {name}: {var} & {ts}"));
                     }
-                    *var = *var & *ts;
+                    *var = intersection;
                 }
             }
             Expression::FnInvoke(name, args) => {
@@ -141,11 +184,14 @@ impl<'a> TypeInferer<'a> {
                     .get(*name)
                     .ok_or_else(|| format!("Function not found: {}", *name))?;
                 for (arg, ts) in args.iter_mut().zip(func.params.iter()) {
-                    self.propagate_type_expr(arg, &(*ts).into())?;
+                    self.propagate_type_expr(arg, &ts.clone().into())?;
                 }
             }
             Expression::Cast(_ex, _ty) => {
                 // Cast will not propagate type constraints
+            }
+            Expression::FieldAccess(_ex, _ty) => {
+                // Field access will not propagate type constraints because struct types should be determinate
             }
             Expression::Neg(ex) => {
                 self.propagate_type_expr(ex, ts)?;
@@ -184,17 +230,16 @@ impl<'a> TypeInferer<'a> {
     fn propagate_type_stmt(&mut self, stmt: &mut Statement, ts: &TypeSet) -> Result<(), String> {
         match stmt {
             Statement::VarDecl(name, decl_ty, ex) => {
-                if let Some(&var_ts) = self.locals.get(*name) {
+                if let Some(var_ts) = self.locals.get(*name) {
                     dprintln!("propagate vardecl {}: {} -> {}", name, *decl_ty, var_ts);
+                    let var_ts = var_ts.clone();
                     self.propagate_type_expr(ex, &var_ts)?;
                     *decl_ty = var_ts;
                 }
             }
-            Statement::VarAssign(name, ex) => {
-                let Some(&var_ts) = self.locals.get(*name) else {
-                    return Err(format!("Assigned-to variable not declared: {name}"));
-                };
-                self.propagate_type_expr(ex, &var_ts)?;
+            Statement::VarAssign(lhs, ex) => {
+                let var_ts = self.forward_type_expr(lhs)?;
+                self.propagate_type_expr(ex, &var_ts.clone())?;
             }
             Statement::Expr(ex) => self.propagate_type_expr(ex, ts)?,
             Statement::Brace(stmts) => {
@@ -214,21 +259,56 @@ impl<'a> TypeInferer<'a> {
                 for stmt in for_stmt.stmts.iter_mut().rev() {
                     self.propagate_type_stmt(stmt, &TypeSet::default())?;
                 }
-                let Some(&idx_ty) = self.locals.get(for_stmt.name) else {
+                let Some(idx_ty) = self.locals.get(for_stmt.name) else {
                     return Err(format!("Could not find variable {}", for_stmt.name));
                 };
                 dprintln!("propagate For {}: {}", for_stmt.name, idx_ty);
+                let idx_ty = idx_ty.clone();
                 self.propagate_type_expr(&mut for_stmt.start, &idx_ty)?;
                 self.propagate_type_expr(&mut for_stmt.end, &idx_ty)?;
             }
             Statement::Return(ex) => {
                 if let Some(ex) = ex {
-                    let ret_ty = self.ret_ty;
-                    self.propagate_type_expr(ex, &ret_ty)?;
+                    self.propagate_type_expr(ex, &self.ret_ty.clone())?;
                 }
             }
+            Statement::Struct(_) => {}
         }
         Ok(())
+    }
+
+    fn forward_lvalue(&mut self, ast: &Expression) -> Result<Option<(String, TypeSet)>, String> {
+        match ast {
+            Expression::LiteralInt(_, _) => Err("Literal int cannot be a lvalue".to_string()),
+            Expression::LiteralFloat(_, _) => Err("Literal float cannot be a lvalue".to_string()),
+            Expression::StrLiteral(_) => Err("Literal string cannot be a lvalue".to_string()),
+            Expression::StructLiteral(_, _) => Err("Literal struct cannot be a lvalue".to_string()),
+            Expression::Variable(name) => {
+                let ts = self
+                    .locals
+                    .get(*name)
+                    .ok_or_else(|| format!("Variable {name} not found"))?;
+                Ok(Some((name.to_string(), ts.clone())))
+            }
+            Expression::FnInvoke(_, _) => {
+                Err("Function return value cannot be a lvalue".to_string())
+            }
+            Expression::Cast(_, _) => Err("Cast expression cannot be a lvalue".to_string()),
+            Expression::FieldAccess(_, _) => {
+                // Struct fields have fixed types, so we do not need to propagate type inference.
+                Ok(None)
+            }
+            Expression::Neg(_)
+            | Expression::Add(_, _)
+            | Expression::Sub(_, _)
+            | Expression::Mul(_, _)
+            | Expression::Div(_, _)
+            | Expression::Lt(_, _)
+            | Expression::Gt(_, _)
+            | Expression::Conditional(_, _, _) => {
+                Err("Arithmetic expression cannot be a lvalue".to_string())
+            }
+        }
     }
 
     fn forward_type_stmt(&mut self, stmt: &Statement) -> Result<TypeSet, String> {
@@ -240,8 +320,8 @@ impl<'a> TypeInferer<'a> {
                 }
                 let ex_ty = self.forward_type_expr(ex)?;
                 let ty;
-                if decl_ty != &TypeSet::default() {
-                    ty = *decl_ty;
+                if decl_ty != &TypeSet::all() {
+                    ty = decl_ty.clone();
                 } else {
                     ty = ex_ty;
                 }
@@ -249,14 +329,13 @@ impl<'a> TypeInferer<'a> {
                 self.locals.insert(name.to_string(), ty);
                 Ok(Type::Void.into())
             }
-            Statement::VarAssign(name, ex) => {
-                let Some(&decl_ty) = self.locals.get(*name) else {
-                    return Err(format!("Assigned-to variable not declared: {name}"));
-                };
-                let ex_ty = self.forward_type_expr(ex)?;
-                let ty = decl_ty & ex_ty;
-                dprintln!("forward varassign {name}: {ty}");
-                self.locals.insert(name.to_string(), ty);
+            Statement::VarAssign(lhs, ex) => {
+                if let Some((name, decl_ty)) = self.forward_lvalue(lhs)? {
+                    let ex_ty = self.forward_type_expr(ex)?;
+                    let ty = decl_ty & ex_ty;
+                    dprintln!("forward varassign {ty}");
+                    self.locals.insert(name, ty);
+                }
                 Ok(Type::Void.into())
             }
             Statement::Brace(stmts) => {
@@ -288,7 +367,7 @@ impl<'a> TypeInferer<'a> {
         match stmt {
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.forward_type_expr(ex)?;
-                let inferred_ty = ex_ty & TypeSet::from(*ty);
+                let inferred_ty = ex_ty & TypeSet::from(ty.clone());
                 if let Some(determined_ty) = inferred_ty.determine() {
                     // .ok_or_else(|| "Type could not be determined".to_string())?;
                     let determined_ts = TypeSet::from(determined_ty);
@@ -300,11 +379,12 @@ impl<'a> TypeInferer<'a> {
             }
             Statement::FnDecl(fn_decl) => {
                 dprintln!("Start type inference on fn {}", fn_decl.name);
-                let mut inferer = TypeInferer::new(fn_decl.ret_ty, self.funcs);
+                let mut inferer =
+                    TypeInferer::new(fn_decl.ret_ty.clone(), self.funcs, self.structs);
                 inferer.locals = fn_decl
                     .params
                     .iter()
-                    .map(|param| (param.name.clone(), param.ty))
+                    .map(|param| (param.name.clone(), param.ty.clone()))
                     .collect();
                 inferer.dump_locals();
                 let mut last_ty = TypeSet::default();
@@ -322,22 +402,23 @@ impl<'a> TypeInferer<'a> {
                 }
                 dprintln!("FnDecl last_ty: {}", last_ty);
                 inferer.dump_locals();
-                if let Some(determined_ty) = (last_ty & fn_decl.ret_ty.into()).determine() {
+                let intersection = &last_ty & &fn_decl.ret_ty.clone().into();
+                if let Some(determined_ty) = intersection.determine() {
                     let determined_ts = TypeSet::from(determined_ty);
                     fn_decl.ret_ty = determined_ts;
                     dprintln!(
                         "Function {}'s return type is inferred to be {}",
                         fn_decl.name,
-                        determined_ty
+                        fn_decl.ret_ty
                     );
                     for stmt in fn_decl.stmts.iter_mut().rev() {
-                        inferer.propagate_type_stmt(stmt, &determined_ts)?;
+                        inferer.propagate_type_stmt(stmt, &fn_decl.ret_ty)?;
                     }
                 } else {
                     dprintln!(
                         "Function {}'s return type could not be determined: {}",
                         fn_decl.name,
-                        last_ty & fn_decl.ret_ty.into()
+                        last_ty & fn_decl.ret_ty.clone().into()
                     );
                     fn_decl.ret_ty = Type::Void.into();
                 }
@@ -361,11 +442,12 @@ impl<'a> TypeInferer<'a> {
 /// Run type inference engine. Since it modifies the type declaration in the AST,
 /// `stmts` needs to be a mutable reference, but it won't add or remove statements, so it doesn't
 /// have to be a `&mut Vec<Statement>`.
-pub fn run_type_infer(
+pub fn run_type_infer<'src>(
     stmts: &mut [Statement],
     types: &mut Vec<FuncType>,
     imports: &[FuncImport],
     funcs: &[FuncDef],
+    structs: &HashMap<String, StructDef>,
     typeinf_f: Option<&mut dyn Write>,
 ) -> CompileResult<()> {
     let mut type_infer_funcs = HashMap::new();
@@ -378,7 +460,7 @@ pub fn run_type_infer(
                 ret_ty: func_ty
                     .results
                     .get(0)
-                    .map_or(TypeSet::default(), |v| (*v).into()),
+                    .map_or_else(TypeSet::default, |v| v.clone().into()),
             },
         );
     }
@@ -391,7 +473,7 @@ pub fn run_type_infer(
                 ret_ty: func_ty
                     .results
                     .get(0)
-                    .map_or(TypeSet::VOID, |f| (*f).into()),
+                    .map_or_else(TypeSet::void, |f| f.clone().into()),
             },
         );
     }
@@ -401,7 +483,7 @@ pub fn run_type_infer(
 
     for (i, stmt) in stmts.iter_mut().enumerate() {
         dprintln!("type inferring toplevel statement {i}");
-        let mut inferer = TypeInferer::new(TypeSet::default(), &type_infer_funcs);
+        let mut inferer = TypeInferer::new(TypeSet::default(), &type_infer_funcs, structs);
         inferer
             .infer_type_stmt(stmt)
             .map_err(|e| CompileError::Compile(e))?;

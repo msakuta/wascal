@@ -88,11 +88,12 @@
             <h2>Built-in functions</h2>
 
             <ul>
-            <li>malloc(size: i32) - Allocates heap memory block with the given size and return a pointer to it.</li>
+            <li>malloc(size: i32) -> i32 - Allocates heap memory block with the given size and return a pointer to it.</li>
             <li>set(ptr: i32, c: i32) - Sets a memory byte at given address. A low level function that end users shouldn't use.</li>
-            <li>strcat(lhs: str, rhs: str) - Standard library function that is used to concatenate strings. Uses should use + operator between strings.</li>
+            <li>strcat(lhs: str, rhs: str) -> str - Standard library function that is used to concatenate strings. Uses should use + operator between strings.</li>
             <li>log(value: i32) - Prints a value to JavaScript console (console.log).</li>
             <li>putc(char: i32) - Puts a single character, specified by ascii code, to the output console.</li>
+            <li>format_f64(v: f64) -> str - Formats a f64 to a string.</li>
             <li>set_fill_style(r: i32, g: i32, b: i32) - Sets fill color for painting on the canvas.</li>
             <li>rectangle(x: i32, y: i32, width: i32, height: i32) - Draws a filled rectangle on the canvas.</li>
             </ul>
@@ -257,6 +258,24 @@ let mandelconverge(creal: f64, cimag: f64) -> i32 = {
     }
     iter
 }
+            </pre>
+
+            <h3>Struct declaration statement</h3>
+            Structs are declared with similar syntax to Rust.
+            Note that all structs in Wascal are heap allocated.
+
+            <pre>
+struct Vec2 {
+    x: f64,
+    y: f64,
+}
+            </pre>
+
+            <h3>Struct field access</h3>
+            With a dot postfix expression, you can access a field of a struct.
+
+            <pre>
+let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ")";
             </pre>
 
             <h2 id="Time">Time measurement resolution</h2>

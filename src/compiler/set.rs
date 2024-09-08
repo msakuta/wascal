@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{const_table::ConstTable, model::FuncDef, parser::VarDecl, FuncImport, FuncType, Type};
 
 use super::{Compiler, OpCode};
@@ -25,7 +27,17 @@ impl<'a> Compiler<'a> {
         ];
         let num_args = args.len();
 
-        let mut compiler = Compiler::new(args, Type::Void, types, imports, const_table, funcs);
+        let structs = HashMap::new();
+
+        let mut compiler = Compiler::new(
+            args,
+            Type::Void,
+            types,
+            imports,
+            const_table,
+            funcs,
+            &structs,
+        );
         compiler.codegen_set()?;
         compiler.code.push(OpCode::End as u8);
 

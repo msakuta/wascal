@@ -1,14 +1,21 @@
+mod emit;
+mod disasm;
 mod malloc;
 mod set;
 mod strcat;
 
-use std::io::{Read, Write};
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+};
 
 use crate::{
     const_table::ConstTable,
-    model::{FuncDef, FuncImport, FuncType, Type},
+    model::{FuncDef, FuncImport, FuncType, StructDef, Type},
     parser::{Expression, For, Statement, VarDecl},
 };
+
+pub use self::disasm::disasm_func;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum OpCode {
@@ -25,9 +32,16 @@ pub(crate) enum OpCode {
     LocalGet = 0x20,
     LocalSet = 0x21,
     I32Load = 0x28,
+    I64Load = 0x29,
+    F32Load = 0x2a,
+    F64Load = 0x2b,
     I32Load8S = 0x2c,
     I32Store = 0x36,
+    I64Store = 0x37,
+    F32Store = 0x38,
+    F64Store = 0x39,
     I32Store8 = 0x3a,
+    I64Store8 = 0x3c,
     I32Const = 0x41,
     I64Const = 0x42,
     F32Const = 0x43,
@@ -119,9 +133,16 @@ impl_op_from!(
     Return: "return", Call: "call", Drop: "drop",
     LocalGet: "local.get", LocalSet: "local.set",
     I32Load: "i32.load",
+    I64Load: "i64.load",
+    F32Load: "f32.load",
+    F64Load: "f64.load",
     I32Load8S: "i32.load8_s",
     I32Store: "i32.store",
+    I64Store: "i64.store",
+    F32Store: "f32.store",
+    F64Store: "f64.store",
     I32Store8: "i32.store8",
+    I64Store8: "i64.store8",
     I32Const: "i32.const",
     I64Const: "i64.const",
     F32Const: "f32.const",
@@ -191,6 +212,12 @@ const LT_TYPE_MAP: TypeMap = TypeMap {
     st: None,
 };
 
+#[derive(Clone, Copy, Debug)]
+enum LValue {
+    Local(usize),
+    Memory(usize),
+}
+
 /// A environment for compiling a function. Note that a program is made of multiple functions,
 /// so you need multiple instances of this object.
 pub struct Compiler<'a> {
@@ -202,6 +229,7 @@ pub struct Compiler<'a> {
     const_table: &'a mut ConstTable,
     /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
+    structs: &'a HashMap<String, StructDef>,
 }
 
 impl<'a> Compiler<'a> {
@@ -212,6 +240,7 @@ impl<'a> Compiler<'a> {
         imports: &'a [FuncImport],
         const_table: &'a mut ConstTable,
         funcs: &'a mut Vec<FuncDef>,
+        structs: &'a HashMap<String, StructDef>,
     ) -> Self {
         let locals = args;
         Self {
@@ -222,6 +251,7 @@ impl<'a> Compiler<'a> {
             imports,
             const_table,
             funcs,
+            structs,
         }
     }
 
@@ -238,7 +268,7 @@ impl<'a> Compiler<'a> {
         // self.code.push(OpCode::LocalGet as u8);
         // encode_leb128(&mut self.code, 0).unwrap();
 
-        let last = self.emit_stmts(ast, ty)?;
+        let last = self.emit_stmts(ast, &ty)?;
 
         self.code.push(OpCode::End as u8);
         Ok(last)
@@ -256,7 +286,7 @@ impl<'a> Compiler<'a> {
             self.types[ret.ty]
                 .results
                 .get(0)
-                .copied()
+                .cloned()
                 .unwrap_or(Type::Void),
         ))
     }
@@ -329,45 +359,6 @@ impl<'a> Compiler<'a> {
         Ok(Type::I32)
     }
 
-    fn i32const(&mut self, val: u32) {
-        self.code.push(OpCode::I32Const as u8);
-        encode_leb128(&mut self.code, val).unwrap();
-    }
-
-    #[allow(dead_code)]
-    fn i32and(&mut self, val: u32) {
-        self.code.push(OpCode::I32And as u8);
-        encode_sleb128(&mut self.code, val as i32).unwrap();
-    }
-
-    fn i32load(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Load as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
-    }
-
-    fn i32load8_s(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Load8S as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
-    }
-
-    fn i32store(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Store as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
-    }
-
-    fn i32store8(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Store8 as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
-    }
-
     pub fn get_code(&self) -> &[u8] {
         &self.code
     }
@@ -423,6 +414,54 @@ impl<'a> Compiler<'a> {
                 self.i32const(str as u32);
                 Ok(Type::Str)
             }
+            Expression::StructLiteral(stname, fields) => {
+                let Some(stdef) = self.structs.get(*stname) else {
+                    return Err(format!("Struct {stname} not found"));
+                };
+
+                let Some((i_malloc, _)) = self
+                    .funcs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, fn_def)| fn_def.name == "malloc")
+                else {
+                    return Err("malloc not found".to_string());
+                };
+
+                let idx_malloc = self.imports.len() + i_malloc;
+
+                self.i32const(stdef.size as u32);
+
+                self.code.push(OpCode::Call as u8);
+                encode_leb128(&mut self.code, idx_malloc as u32).unwrap();
+
+                let ptr = self.add_local("", Type::Struct(stname.to_string()));
+
+                for (fname, field) in fields {
+                    self.local_get(ptr);
+                    let ex = self.emit_expr(field)?;
+                    let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname)
+                    else {
+                        return Err(format!("Struct field {fname} not found"));
+                    };
+                    self.code.push(match ex {
+                        Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Store,
+                        Type::I64 => OpCode::I64Store,
+                        Type::F32 => OpCode::F32Store,
+                        Type::F64 => OpCode::F64Store,
+                        Type::Void => {
+                            return Err(format!("Struct field {} has a void type", stfield.name))
+                        }
+                    } as u8);
+                    encode_leb128(&mut self.code, 0).unwrap();
+                    encode_leb128(&mut self.code, stfield.offset as u32).unwrap();
+                    println!("field {fname}: offset {offset}", offset = stfield.offset);
+                }
+
+                self.local_get(ptr);
+
+                Ok(Type::Struct(stname.to_string()))
+            }
             Expression::Variable(name) => {
                 let (ret, local) = self
                     .locals
@@ -461,12 +500,26 @@ impl<'a> Compiler<'a> {
                 self.code.push(OpCode::Call as u8);
                 encode_leb128(&mut self.code, idx as u32).unwrap();
                 let fn_ty = &self.types[fn_ty];
-                Ok(fn_ty.results.get(0).copied().unwrap_or(Type::Void))
+                Ok(fn_ty.results.get(0).cloned().unwrap_or(Type::Void))
             }
             Expression::Cast(ex, ty) => {
                 let ex_ty = self.emit_expr(ex)?;
-                self.coerce_type(*ty, ex_ty)?;
-                Ok(*ty)
+                self.coerce_type(ty, &ex_ty)?;
+                Ok(ty.clone())
+            }
+            Expression::FieldAccess(ex, fname) => {
+                let ex_ty = self.emit_expr(ex)?;
+                let Type::Struct(stname) = ex_ty else {
+                    return Err("Field access operator applied to non-struct".to_string());
+                };
+                let Some(stdef) = self.structs.get(&stname) else {
+                    return Err(format!("Struct {stname} not found"));
+                };
+                let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname) else {
+                    return Err(format!("Struct field {fname} not found"));
+                };
+                self.field_load(stfield)?;
+                Ok(stfield.ty.clone())
             }
             Expression::Neg(ex) => {
                 match self.emit_expr(ex)? {
@@ -500,6 +553,9 @@ impl<'a> Compiler<'a> {
                     }
                     Type::Void => Ok(Type::Void),
                     Type::Str => return Err("Unary minus is not defined for str".to_string()),
+                    Type::Struct(_) => {
+                        return Err("Unary minus is not defined for struct".to_string())
+                    }
                 }
             }
             Expression::Add(lhs, rhs) => self.emit_bin_op(
@@ -572,13 +628,13 @@ impl<'a> Compiler<'a> {
                 let ty_fixup = self.code.len();
                 self.code.push(Type::Void.code());
 
-                let t_result = self.emit_stmts(t_branch, Type::Void)?;
+                let t_result = self.emit_stmts(t_branch, &Type::Void)?;
 
                 self.code[ty_fixup] = t_result.code();
 
                 if let Some(f_branch) = f_branch {
                     self.code.push(OpCode::Else as u8);
-                    let f_result = self.emit_stmts(f_branch, Type::Void)?;
+                    let f_result = self.emit_stmts(f_branch, &Type::Void)?;
                     if f_result != t_result {
                         return Err(format!("True branch type {t_result} and false branch type {f_result} does not match"));
                     }
@@ -589,6 +645,70 @@ impl<'a> Compiler<'a> {
                 self.code.push(OpCode::End as u8);
 
                 Ok(t_result)
+            }
+        }
+    }
+
+    /// Emit lvalue from expression. It produces exactly one value onto the stack, so we don't need to return index
+    fn emit_lvalue(&mut self, ast: &Expression) -> Result<(LValue, Type), String> {
+        match ast {
+            Expression::LiteralInt(_, _) => Err("Literal int cannot be a lvalue".to_string()),
+            Expression::LiteralFloat(_, _) => Err("Literal float cannot be a lvalue".to_string()),
+            Expression::StrLiteral(_) => Err("Literal string cannot be a lvalue".to_string()),
+            Expression::StructLiteral(_, _) => Err("Literal struct cannot be a lvalue".to_string()),
+            Expression::Variable(name) => {
+                let (ret, local) = self
+                    .locals
+                    .iter()
+                    .enumerate()
+                    .find(|(_, local)| &local.name == name)
+                    .ok_or_else(|| format!("Variable {name} not found"))?;
+                Ok((
+                    LValue::Local(ret),
+                    local
+                        .ty
+                        .determine()
+                        .ok_or_else(|| "Type could not be determined".to_string())?,
+                ))
+            }
+            Expression::FnInvoke(_, _) => {
+                Err("Function return value cannot be a lvalue".to_string())
+            }
+            Expression::Cast(_, _) => Err("Cast expression cannot be a lvalue".to_string()),
+            Expression::FieldAccess(ex, fname) => {
+                let (st, ty) = self.emit_lvalue(ex)?;
+
+                let Type::Struct(stname) = &ty else {
+                    return Err("Field access operator applied to a non-struct".to_string());
+                };
+
+                let Some(stdef) = self.structs.get(stname) else {
+                    return Err(format!("Struct {stname} was not found"));
+                };
+
+                let Some(stfield) = stdef.fields.iter().find(|f| &f.name == fname) else {
+                    return Err(format!("Struct field {fname} was not found"));
+                };
+
+                match st {
+                    LValue::Local(local) => {
+                        self.local_get(local);
+                    }
+                    LValue::Memory(offset) => {
+                        self.i32load(offset as u32)?;
+                    }
+                }
+                Ok((LValue::Memory(stfield.offset), stfield.ty.clone()))
+            }
+            Expression::Neg(_)
+            | Expression::Add(_, _)
+            | Expression::Sub(_, _)
+            | Expression::Mul(_, _)
+            | Expression::Div(_, _)
+            | Expression::Lt(_, _)
+            | Expression::Gt(_, _)
+            | Expression::Conditional(_, _, _) => {
+                Err("Arithmetic expression cannot be a lvalue".to_string())
             }
         }
     }
@@ -607,7 +727,7 @@ impl<'a> Compiler<'a> {
     ) -> Result<Type, String> {
         let lhs = self.emit_expr(lhs)?;
         let rhs = self.emit_expr(rhs)?;
-        let (op, ty) = match (lhs, rhs) {
+        let (op, ty) = match (&lhs, &rhs) {
             (Type::I32, Type::I32) => (ty_map.i32, lhs),
             (Type::I64, Type::I64) => (ty_map.i64, lhs),
             (Type::F32, Type::F32) => (ty_map.f32, lhs),
@@ -645,7 +765,7 @@ impl<'a> Compiler<'a> {
     ) -> Result<Type, String> {
         let lhs = self.emit_expr(lhs)?;
         let rhs = self.emit_expr(rhs)?;
-        let op = match (lhs, rhs) {
+        let op = match (&lhs, &rhs) {
             (Type::I32, Type::I32) => ty_map.i32,
             (Type::I64, Type::I64) => ty_map.i64,
             (Type::F32, Type::F32) => ty_map.f32,
@@ -667,30 +787,36 @@ impl<'a> Compiler<'a> {
     }
 
     /// Returns if a value is pushed to the stack
-    fn emit_stmt(&mut self, stmt: &Statement, ty: Type) -> Result<Type, String> {
+    fn emit_stmt(&mut self, stmt: &Statement, ty: &Type) -> Result<Type, String> {
         match stmt {
             Statement::Expr(ex) => self.emit_expr(ex),
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.emit_expr(ex)?;
                 let ty = ty.determine().unwrap();
-                self.coerce_type(ty, ex_ty).map_err(|_| {
+                self.coerce_type(&ty, &ex_ty).map_err(|_| {
                     format!(
-                        "Variable declared type {ty:?} and initializer type {ex_ty:?} are different"
+                        "Variable declared type {ty} and initializer type {ex_ty} are different"
                     )
                 })?;
                 self.add_local(*name, ty);
                 Ok(Type::Void)
             }
-            Statement::VarAssign(name, ex) => {
+            Statement::VarAssign(lhs, ex) => {
+                let (lvalue, ty) = self.emit_lvalue(lhs)?;
                 self.emit_expr(ex)?;
-                let (idx, _) = self
-                    .locals
-                    .iter()
-                    .enumerate()
-                    .find(|(_, local)| &local.name == name)
-                    .ok_or_else(|| format!("Variable {name} not found"))?;
-                self.code.push(OpCode::LocalSet as u8);
-                encode_leb128(&mut self.code, idx as u32).unwrap();
+                match lvalue {
+                    LValue::Local(local) => {
+                        self.code.push(OpCode::LocalSet as u8);
+                        encode_leb128(&mut self.code, local as u32).unwrap();
+                    }
+                    LValue::Memory(offset) => match ty {
+                        Type::I32 | Type::Str | Type::Struct(_) => self.i32store(offset as u32)?,
+                        Type::I64 => self.i64store(offset as u32)?,
+                        Type::F32 => self.f32store(offset as u32)?,
+                        Type::F64 => self.f64store(offset as u32)?,
+                        Type::Void => return Err("Cannot store to a void".to_string()),
+                    },
+                }
                 Ok(Type::Void)
             }
             Statement::FnDecl(_) => {
@@ -704,10 +830,10 @@ impl<'a> Compiler<'a> {
                 stmts,
             }) => {
                 let start_ty = self.emit_expr(start)?;
-                let idx = self.add_local(*name, start_ty);
+                let idx = self.add_local(*name, start_ty.clone());
 
                 let end_ty = self.emit_expr(end)?;
-                let end = self.add_local("", end_ty);
+                let end = self.add_local("", end_ty.clone());
 
                 if start_ty != end_ty {
                     return Err(format!(
@@ -716,7 +842,7 @@ impl<'a> Compiler<'a> {
                 }
 
                 self.emit_for_loop(idx, end, start_ty, |this| {
-                    this.emit_stmts(stmts, Type::Void).map(|_| ())
+                    this.emit_stmts(stmts, &Type::Void).map(|_| ())
                 })?;
 
                 Ok(Type::Void)
@@ -724,29 +850,31 @@ impl<'a> Compiler<'a> {
             Statement::Brace(stmts) => {
                 let res_ty = self.emit_stmts(stmts, ty)?;
                 if res_ty != Type::Void {
-                    self.coerce_type(ty, res_ty)?;
+                    self.coerce_type(&ty, &res_ty)?;
                 }
                 Ok(Type::Void)
             }
             Statement::Return(ex) => {
                 if let Some(ex) = ex {
                     let ex_ty = self.emit_expr(ex)?;
-                    self.coerce_type(self.ret_ty, ex_ty)?;
+                    let ret_ty = self.ret_ty.clone();
+                    self.coerce_type(&ret_ty, &ex_ty)?;
                 }
                 self.code.push(OpCode::Return as u8);
                 Ok(Type::Void)
             }
+            Statement::Struct(_) => Ok(Type::Void),
         }
     }
 
-    fn emit_stmts(&mut self, stmts: &[Statement], ty: Type) -> Result<Type, String> {
+    fn emit_stmts(&mut self, stmts: &[Statement], ty: &Type) -> Result<Type, String> {
         let mut last_ty = Type::Void;
         if 1 <= stmts.len() {
             for stmt in &stmts[..stmts.len() - 1] {
                 for _ in 0..last_ty.word_count() {
                     self.code.push(OpCode::Drop as u8);
                 }
-                last_ty = self.emit_stmt(stmt, Type::Void)?;
+                last_ty = self.emit_stmt(stmt, &Type::Void)?;
             }
         }
         if let Some(last_stmt) = stmts.last() {
@@ -772,7 +900,7 @@ impl<'a> Compiler<'a> {
         ret
     }
 
-    fn coerce_type(&mut self, ty: Type, ex: Type) -> Result<(), String> {
+    fn coerce_type(&mut self, ty: &Type, ex: &Type) -> Result<(), String> {
         match (ty, ex) {
             (Type::I32, Type::I32)
             | (Type::I64, Type::I64)
@@ -784,6 +912,11 @@ impl<'a> Compiler<'a> {
             (Type::I64, Type::I32) => self.code.push(OpCode::I64ExtendI32S as u8),
             (Type::I32, Type::F64) => self.code.push(OpCode::I32TruncF64S as u8),
             (Type::F64, Type::I32) => self.code.push(OpCode::F64ConvertI32S as u8),
+            (Type::Struct(ty), Type::Struct(ex)) => {
+                if ty != ex {
+                    return Err(format!("Coercing type {ty:?} from type {ex:?} failed"));
+                }
+            }
             _ => return Err(format!("Coercing type {ty:?} from type {ex:?} failed")),
         }
         Ok(())
@@ -939,148 +1072,4 @@ pub(crate) fn decode_sleb128(f: &mut impl Read) -> std::io::Result<i32> {
         value |= !0 << shift;
     }
     return Ok(value as i32);
-}
-
-pub fn disasm(code: &[u8], f: &mut impl Write) -> std::io::Result<()> {
-    use OpCode::*;
-    let mut cur = std::io::Cursor::new(code);
-    let mut block_level = 1;
-    loop {
-        let mut op_code_buf = [0u8];
-        cur.read_exact(&mut op_code_buf)?;
-        let op_code = op_code_buf[0];
-        let indent = "  ".repeat(block_level);
-        let code = OpCode::from(op_code);
-        match code {
-            Block => {
-                let mut ty = [0u8];
-                cur.read_exact(&mut ty)?;
-                writeln!(f, "{indent}block (result {})", Type::from(ty[0]))?;
-                block_level += 1;
-            }
-            Loop => {
-                let mut ty = [0u8];
-                cur.read_exact(&mut ty)?;
-                writeln!(f, "{indent}loop (result {})", Type::from(ty[0]))?;
-                block_level += 1;
-            }
-            If => {
-                let mut ty = [0u8];
-                cur.read_exact(&mut ty)?;
-                writeln!(f, "{indent}if (result {})", Type::from(ty[0]))?;
-                block_level += 1;
-            }
-            Else => {
-                writeln!(f, "{indent}else")?;
-            }
-            Br => {
-                let mut label = [0u8];
-                cur.read_exact(&mut label)?;
-                writeln!(f, "{indent}br {}", label[0])?;
-            }
-            BrIf => {
-                let mut label = [0u8];
-                cur.read_exact(&mut label)?;
-                writeln!(f, "{indent}br_if {}", label[0])?;
-            }
-            Return => {
-                writeln!(f, "{indent}return")?;
-            }
-            Call => {
-                let arg = decode_leb128(&mut cur)?;
-                writeln!(f, "{indent}call {arg}")?;
-            }
-            Drop => {
-                writeln!(f, "{indent}drop")?;
-            }
-            LocalGet => {
-                let arg = decode_leb128(&mut cur)?;
-                writeln!(f, "{indent}local.get {arg}")?;
-            }
-            LocalSet => {
-                let arg = decode_leb128(&mut cur)?;
-                writeln!(f, "{indent}local.set {arg}")?;
-            }
-            I32Store | I32Store8 | I32Load | I32Load8S => {
-                let mem = decode_leb128(&mut cur)?;
-                let align = decode_leb128(&mut cur)?;
-                writeln!(f, "{indent}{} {mem} {align}", code.to_name())?;
-            }
-            I32Const => {
-                let arg = decode_sleb128(&mut cur)?;
-                writeln!(f, "{indent}i32.const {arg}")?;
-            }
-            I64Const => {
-                let arg = decode_sleb128(&mut cur)?;
-                writeln!(f, "{indent}i64.const {arg}")?;
-            }
-            F32Const => {
-                let mut buf = [0u8; std::mem::size_of::<f32>()];
-                cur.read_exact(&mut buf)?;
-                let arg = f32::from_le_bytes(buf);
-                writeln!(f, "{indent}f32.const {arg}")?;
-            }
-            F64Const => {
-                let mut buf = [0u8; std::mem::size_of::<f64>()];
-                cur.read_exact(&mut buf)?;
-                let arg = f64::from_le_bytes(buf);
-                writeln!(f, "{indent}f64.const {arg}")?;
-            }
-            I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS | I32GeU | I32Add
-            | I32Sub | I32Mul | I32DivS | I32And | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS
-            | I64LeU | I64GeS | I64GeU | I64Add | I64Sub | I64Mul | I64DivS | F32Neg | F32Lt
-            | F32Gt | F32Le | F32Ge | F32Add | F32Sub | F32Mul | F32Div | F64Neg | F64Lt
-            | F64Gt | F64Le | F64Ge | F64Add | F64Sub | F64Mul | F64Div | I32WrapI64
-            | I32TruncF32S | I32TruncF64S | I64ExtendI32S | I64TruncF32S | I64TruncF64S
-            | F32ConvertI32S | F32ConvertI64S | F32DemoteF64 | F64ConvertI32S | F64ConvertI64S
-            | F64PromoteF32 => {
-                writeln!(f, "{indent}{}", code.to_name())?;
-            }
-            End => {
-                writeln!(f, "{indent}end")?;
-                block_level -= 1;
-                if block_level == 0 {
-                    return Ok(());
-                };
-            }
-        }
-    }
-}
-
-pub fn disasm_func(
-    func: &FuncDef,
-    func_ty: &FuncType,
-    out: &mut impl Write,
-) -> std::io::Result<()> {
-    let params = &func.locals[..func_ty.params.len()];
-    let params = params.iter().fold("".to_string(), |mut acc, cur| {
-        if !acc.is_empty() {
-            acc += ", ";
-        }
-        acc += &format!("{}: {}", cur.name, cur.ty);
-        acc
-    });
-
-    writeln!(
-        out,
-        "Disasm {}{}({}) -> {}: ",
-        if func.public { "pub " } else { "" },
-        func.name,
-        params,
-        func_ty.results.first().unwrap_or(&Type::Void)
-    )?;
-    let locals = &func.locals[func_ty.params.len()..];
-    let locals = locals
-        .iter()
-        .enumerate()
-        .fold("".to_string(), |mut acc, (i, cur)| {
-            if !acc.is_empty() {
-                acc += ", ";
-            }
-            acc += &format!("[{}] {}: {}", i + func_ty.params.len(), cur.name, cur.ty);
-            acc
-        });
-    writeln!(out, "  locals: {locals}")?;
-
-    disasm(&func.code, out)
 }

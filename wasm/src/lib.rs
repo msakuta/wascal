@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use wascal::{compile_wasm, disasm_wasm, typeinf_wasm, FuncImport, FuncType, Type};
+use wascal::{compile_wasm, default_types, disasm_wasm, typeinf_wasm, FuncImport, FuncType, Type};
 
 #[wasm_bindgen]
 pub fn parse_ast(source: &str) -> Result<String, JsValue> {
@@ -44,11 +44,9 @@ pub fn disasm(source: &str) -> Result<String, JsValue> {
 }
 
 fn default_imports() -> (Vec<FuncType>, Vec<FuncImport>) {
-    let types = vec![
-        FuncType {
-            params: vec![Type::I32],
-            results: vec![Type::I32],
-        },
+    let mut types = default_types();
+    let num_default_types = types.len();
+    types.extend([
         FuncType {
             params: vec![Type::I32, Type::I32, Type::I32],
             results: vec![],
@@ -57,30 +55,21 @@ fn default_imports() -> (Vec<FuncType>, Vec<FuncImport>) {
             params: vec![Type::I32, Type::I32, Type::I32, Type::I32],
             results: vec![],
         },
-    ];
+    ]);
 
-    let imports = vec![
-        FuncImport {
-            module: "console".to_string(),
-            name: "log".to_string(),
-            ty: 0,
-        },
-        FuncImport {
-            module: "output".to_string(),
-            name: "putc".to_string(),
-            ty: 0,
-        },
+    let mut imports = wascal::default_imports();
+    imports.extend([
         FuncImport {
             module: "canvas".to_string(),
             name: "set_fill_style".to_string(),
-            ty: 1,
+            ty: num_default_types,
         },
         FuncImport {
             module: "canvas".to_string(),
             name: "rectangle".to_string(),
-            ty: 2,
+            ty: num_default_types + 1,
         },
-    ];
+    ]);
 
     (types, imports)
 }

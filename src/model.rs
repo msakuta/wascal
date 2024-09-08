@@ -1,6 +1,8 @@
-use crate::parser::VarDecl;
+use std::collections::HashSet;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use crate::parser::{StructDecl, VarDecl};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     I32,
     I64,
@@ -9,6 +11,7 @@ pub enum Type {
     // Pseudo type representing no value
     Void,
     Str,
+    Struct(String),
 }
 
 impl Type {
@@ -21,6 +24,8 @@ impl Type {
             Self::Void => 0x40,
             // Str is a compound type, but it is returned as an i32 pointing the buffer.
             Self::Str => 0x7f,
+            // Struct is also heap allocated.
+            Self::Struct(_) => 0x7f,
         }
     }
 
@@ -29,7 +34,16 @@ impl Type {
     /// has 2 words (a pointer and a size), and Void type has 0 words.
     pub(crate) fn word_count(&self) -> usize {
         match self {
-            Self::Str | Self::I32 | Self::I64 | Self::F32 | Self::F64 => 1,
+            Self::Str | Self::I32 | Self::I64 | Self::F32 | Self::F64 | Self::Struct(_) => 1,
+            Self::Void => 0,
+        }
+    }
+
+    /// Size occupied in linear memory, in bytes.
+    pub(crate) fn size(&self) -> usize {
+        match self {
+            Self::Str | Self::I32 | Self::F32 | Self::Struct(_) => 4,
+            Self::I64 | Self::F64 => 8,
             Self::Void => 0,
         }
     }
@@ -59,7 +73,13 @@ impl TryFrom<&str> for Type {
             "f64" => Type::F64,
             "void" => Type::Void,
             "str" => Type::Str,
-            _ => return Err(format!("Unknown type {}", value)),
+            s => {
+                if s.is_empty() {
+                    return Err(format!("Unknown type {}", value));
+                } else {
+                    Type::Struct(s.to_string())
+                }
+            }
         })
     }
 }
@@ -73,11 +93,12 @@ impl std::fmt::Display for Type {
             Self::F64 => write!(f, "f64"),
             Self::Void => write!(f, "void"),
             Self::Str => write!(f, "str"),
+            Self::Struct(name) => write!(f, "{name}"),
         }
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct TypeSet {
     pub i32: bool,
     pub i64: bool,
@@ -85,79 +106,147 @@ pub struct TypeSet {
     pub f64: bool,
     pub void: bool,
     pub st: bool,
+    pub structs: HashSet<String>,
 }
 
 impl TypeSet {
-    pub const I32: Self = Self {
-        i32: true,
-        i64: false,
-        f32: false,
-        f64: false,
-        void: false,
-        st: false,
-    };
-    pub const I64: Self = Self {
-        i32: false,
-        i64: true,
-        f32: false,
-        f64: false,
-        void: false,
-        st: false,
-    };
-    pub const F32: Self = Self {
-        i32: false,
-        i64: false,
-        f32: true,
-        f64: false,
-        void: false,
-        st: false,
-    };
-    pub const F64: Self = Self {
-        i32: false,
-        i64: false,
-        f32: false,
-        f64: true,
-        void: false,
-        st: false,
-    };
-    pub const VOID: Self = Self {
-        i32: false,
-        i64: false,
-        f32: false,
-        f64: false,
-        void: true,
-        st: false,
-    };
-    pub const STR: Self = Self {
-        i32: false,
-        i64: false,
-        f32: false,
-        f64: false,
-        void: false,
-        st: true,
-    };
-    pub const ALL: Self = Self {
-        i32: true,
-        i64: true,
-        f32: true,
-        f64: true,
-        void: true,
-        st: true,
-    };
+    pub fn i32() -> Self {
+        Self {
+            i32: true,
+            i64: false,
+            f32: false,
+            f64: false,
+            void: false,
+            st: false,
+            structs: HashSet::new(),
+        }
+    }
 
-    pub fn is_none(&self) -> bool {
+    pub fn i64() -> Self {
+        Self {
+            i32: false,
+            i64: true,
+            f32: false,
+            f64: false,
+            void: false,
+            st: false,
+            structs: HashSet::new(),
+        }
+    }
+
+    pub fn f32() -> Self {
+        Self {
+            i32: false,
+            i64: false,
+            f32: true,
+            f64: false,
+            void: false,
+            st: false,
+            structs: HashSet::new(),
+        }
+    }
+
+    pub fn f64() -> Self {
+        Self {
+            i32: false,
+            i64: false,
+            f32: false,
+            f64: true,
+            void: false,
+            st: false,
+            structs: HashSet::new(),
+        }
+    }
+
+    pub fn void() -> Self {
+        Self {
+            i32: false,
+            i64: false,
+            f32: false,
+            f64: false,
+            void: true,
+            st: false,
+            structs: HashSet::new(),
+        }
+    }
+
+    pub fn str() -> Self {
+        Self {
+            i32: false,
+            i64: false,
+            f32: false,
+            f64: false,
+            void: false,
+            st: true,
+            structs: HashSet::new(),
+        }
+    }
+
+    pub fn all() -> Self {
+        Self {
+            i32: true,
+            i64: true,
+            f32: true,
+            f64: true,
+            void: true,
+            st: true,
+            structs: HashSet::new(),
+        }
+    }
+
+    pub fn is_non_primitive(&self) -> bool {
         !self.i32 && !self.i64 && !self.f32 && !self.f64 && !self.st
     }
 
+    pub fn is_none(&self) -> bool {
+        self.is_non_primitive() && self.structs.is_empty()
+    }
+
+    pub fn iter_primitives(&self) -> impl Iterator<Item = (Type, bool)> {
+        std::iter::once((Type::I32, self.i32))
+            .chain(std::iter::once((Type::I64, self.i64)))
+            .chain(std::iter::once((Type::F32, self.f32)))
+            .chain(std::iter::once((Type::F64, self.f64)))
+            .chain(std::iter::once((Type::Void, self.void)))
+    }
+
     pub fn determine(&self) -> Option<Type> {
-        match self {
-            &Self::I32 => Some(Type::I32),
-            &Self::I64 => Some(Type::I64),
-            &Self::F32 => Some(Type::F32),
-            &Self::F64 => Some(Type::F64),
-            &Self::VOID => Some(Type::Void),
-            &Self::STR => Some(Type::Str),
-            _ => None,
+        if self.structs.is_empty() {
+            if self == &Type::I32.into() {
+                return Some(Type::I32);
+            } else if self == &Type::I64.into() {
+                return Some(Type::I64);
+            } else if self == &Type::F32.into() {
+                return Some(Type::F32);
+            } else if self == &Type::F64.into() {
+                return Some(Type::F64);
+            } else if self == &Type::Void.into() {
+                return Some(Type::Void);
+            } else if self == &Type::Str.into() {
+                return Some(Type::Str);
+            }
+            None
+        } else if self.is_non_primitive() && self.structs.len() == 1 {
+            self.structs
+                .iter()
+                .next()
+                .map(|name| Type::Struct(name.clone()))
+        } else {
+            None
+        }
+    }
+}
+
+impl From<u8> for TypeSet {
+    fn from(value: u8) -> Self {
+        Self {
+            i32: value & 0x1 != 0,
+            i64: value & 0x2 != 0,
+            f32: value & 0x4 != 0,
+            f64: value & 0x8 != 0,
+            void: value & 0x10 != 0,
+            st: value & 0x20 != 0,
+            structs: HashSet::new(),
         }
     }
 }
@@ -172,6 +261,7 @@ impl std::ops::BitOr for TypeSet {
             f64: self.f64 | rhs.f64,
             void: self.void | rhs.void,
             st: self.st | rhs.st,
+            structs: self.structs.union(&rhs.structs).cloned().collect(),
         }
     }
 }
@@ -186,6 +276,22 @@ impl std::ops::BitAnd for TypeSet {
             f64: self.f64 & rhs.f64,
             void: self.void & rhs.void,
             st: self.st & rhs.st,
+            structs: self.structs.intersection(&rhs.structs).cloned().collect(),
+        }
+    }
+}
+
+impl std::ops::BitAnd for &TypeSet {
+    type Output = TypeSet;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        TypeSet {
+            i32: self.i32 & rhs.i32,
+            i64: self.i64 & rhs.i64,
+            f32: self.f32 & rhs.f32,
+            f64: self.f64 & rhs.f64,
+            void: self.void & rhs.void,
+            st: self.st & rhs.st,
+            structs: self.structs.intersection(&rhs.structs).cloned().collect(),
         }
     }
 }
@@ -200,8 +306,18 @@ impl From<Type> for TypeSet {
             Type::F64 => ret.f64 = true,
             Type::Void => ret.void = true,
             Type::Str => ret.st = true,
+            Type::Struct(name) => {
+                ret.structs.insert(name);
+            }
         }
         ret
+    }
+}
+
+impl From<&Type> for TypeSet {
+    fn from(value: &Type) -> Self {
+        let value = value.clone();
+        value.into()
     }
 }
 
@@ -227,6 +343,11 @@ impl std::fmt::Display for TypeSet {
         write_ty(self.f64, "f64")?;
         write_ty(self.void, "void")?;
         write_ty(self.st, "str")?;
+
+        for st in &self.structs {
+            write_ty(true, st)?;
+        }
+
         if !written {
             write!(f, "(none)")?;
         }
@@ -254,4 +375,35 @@ pub(crate) struct FuncDef {
     pub code: Vec<u8>,
     pub locals: Vec<VarDecl>,
     pub public: bool,
+}
+
+pub(crate) struct StructDef {
+    pub(crate) fields: Vec<StructFieldDef>,
+    pub(crate) size: usize,
+}
+
+impl<'a> From<&StructDecl<'a>> for StructDef {
+    fn from(value: &StructDecl) -> Self {
+        let mut offset = 0;
+        let mut fields = vec![];
+        for field in &value.fields {
+            fields.push(StructFieldDef {
+                name: field.name.to_string(),
+                ty: field.ty.clone(),
+                offset,
+            });
+            offset += field.ty.size();
+        }
+
+        Self {
+            fields,
+            size: offset,
+        }
+    }
+}
+
+pub(crate) struct StructFieldDef {
+    pub(crate) name: String,
+    pub(crate) ty: Type,
+    pub(crate) offset: usize,
 }

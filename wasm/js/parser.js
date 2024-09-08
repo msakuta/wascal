@@ -10,7 +10,9 @@ var builtins = wordRE([
 ]);
 var keywords = wordRE(["break","return",
                         "pub", "let", "if", "else",
-                        "for", "in", ]);
+                        "for", "in", "to",
+                        "struct",
+                        "i32", "i64", "f32", "f64", "str" ]);
 
 var indentTokens = wordRE(["\\(", "{"]);
 var dedentTokens = wordRE(["\\)", "}"]);
