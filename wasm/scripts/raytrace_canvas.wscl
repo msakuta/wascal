@@ -91,6 +91,7 @@ pub let main() -> void = {
     let radius: f64 = 5.;
     let pixels: i32 = 40;
     let width: i32 = 4;
+    let u8_max: f64 = 191.;
     for y in -pixels to pixels {
         let _: i32 = y;
         for x in -pixels to pixels {
@@ -105,10 +106,13 @@ pub let main() -> void = {
                 ground_color(scale(ray, hit_g), light, sphere, radius);
             } else if 0. < hit_s {
                 let hit_pos = scale(ray, hit_s);
-                let normal = hit_pos - sphere;
+                let normal = normalize(hit_pos - sphere);
                 let light_dot = dot(light, normal);
                 if light_dot < 0. {
-                    set_fill_style(255, 0, 0);
+                    let light_neg = 1. + light_dot;
+                    let diffuse = 1. - light_neg * light_neg;
+                    let brightness = (diffuse * u8_max) as i32;
+                    set_fill_style(255, brightness, brightness);
                 } else {
                     set_fill_style(63, 0, 0);
                 }
