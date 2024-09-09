@@ -41,6 +41,7 @@ function addStringToWasm(s) {
     if (!obj) return;
     const view32 = new Int32Array(obj.instance.exports.memory.buffer);
     const top = view32[0];
+    while (obj.instance.exports.memory.buffer.byteLength < top + s.length + 4) obj.instance.exports.memory.grow(1);
     const textEncoder = new TextEncoder('utf8');
     const encodedString = textEncoder.encode(s);
     const lengthView = new Uint32Array(obj.instance.exports.memory.buffer, top, 1);
