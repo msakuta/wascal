@@ -457,6 +457,11 @@ impl<'a> TypeInferer<'a> {
                     for stmt in fn_decl.stmts.iter_mut().rev() {
                         inferer.propagate_type_stmt(stmt, &fn_decl.ret_ty)?;
                     }
+                } else if fn_decl.ret_ty == TypeSet::void() {
+                    dprintln!("Function {} returns void; coercing", fn_decl.name);
+                    for stmt in fn_decl.stmts.iter_mut().rev() {
+                        inferer.propagate_type_stmt(stmt, &fn_decl.ret_ty)?;
+                    }
                 } else {
                     dprintln!(
                         "Function {}'s return type could not be determined: {}",

@@ -912,6 +912,9 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Coercing type {ty:?} from type {ex:?} failed"));
                 }
             }
+            (Type::Void, Type::I32 | Type::I64 | Type::F32 | Type::F64) => {
+                self.code.push(OpCode::Drop as u8);
+            }
             _ => return Err(format!("Coercing type {ty:?} from type {ex:?} failed")),
         }
         Ok(())
