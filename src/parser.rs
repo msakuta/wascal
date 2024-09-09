@@ -406,22 +406,21 @@ fn cmp_expr(i: &str) -> IResult<&str, Expression> {
 }
 
 fn logical_expr(i: &str) -> IResult<&str, Expression> {
-    let (r, lhs) = cmp_expr(i)?;
+    let (r, mut lhs) = cmp_expr(i)?;
 
-    let Ok((r, op)) = recognize("&&")(space(r)).or_else(|_| recognize("||")(space(r))) else {
-        return Ok((r, lhs));
-    };
+    let mut r = space(r);
 
-    let (r, rhs) = cmp_expr(r)?;
-
-    Ok((
-        r,
-        if op == "&&" {
+    while let Ok((next_r, op)) = recognize("&&")(r).or_else(|_| recognize("||")(r)) {
+        let (next_r, rhs) = cmp_expr(space(next_r))?;
+        r = space(next_r);
+        lhs = if op == "&&" {
             Expression::And(Box::new(lhs), Box::new(rhs))
         } else {
             Expression::Or(Box::new(lhs), Box::new(rhs))
-        },
-    ))
+        };
+    }
+
+    Ok((r, lhs))
 }
 
 fn else_clause(i: &str) -> IResult<&str, Vec<Statement>> {

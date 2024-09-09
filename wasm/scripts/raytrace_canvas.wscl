@@ -25,6 +25,8 @@ let normalize(v: Vec3) -> Vec3 = {
 }
 let scale(v: Vec3, s: f64) -> Vec3 = Vec3 { x: v.x * s, y: v.y * s, z: v.z * s };
 
+let format_vec3(s: Vec3) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ", " + format_f64(s.z) + ")";
+
 let hit_sphere(obj: Vec3, radius: f64, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
     let del = src - obj;
 
@@ -54,11 +56,23 @@ let hit_sphere(obj: Vec3, radius: f64, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
     }
 }
 
-let format_vec3(s: Vec3) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ", " + format_f64(s.z) + ")";
+let hit_plane(obj: Vec3, normal: Vec3, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
+    let delta = src - obj;
+    let dist = dot(delta, normal);
+    let ray_speed = dot(dir, normal);
+    let t = -dist / ray_speed;
+    if t < 0. && dt < t {
+        -1.
+    } else {
+        t
+    }
+}
 
 pub let main() -> void = {
     let ray_source = Vec3 { x: 0., y: 0., z: 0. };
     let sphere = Vec3 { x: 0., y: 0., z: -10. };
+    let ground = Vec3 { x: 0., y: 2., z: 0. };
+    let ground_normal = Vec3 { x: 0., y: 1., z: 0.};
     let light = normalize(Vec3 { x: 0.5, y: 1., z: -0.25 });
     let radius: f64 = 5.;
     let pixels: i32 = 20;
@@ -69,10 +83,14 @@ pub let main() -> void = {
 
             let ray = normalize(Vec3 { x: x as f64 / pixels as f64, y: y as f64 / pixels as f64, z: -1. });
 
-            let hit_f = hit_sphere(sphere, radius, ray_source, ray, 50.);
+            let hit_s = hit_sphere(sphere, radius, ray_source, ray, 50.);
 
-            if 0. < hit_f {
-                let hit_pos = scale(ray, hit_f);
+            let hit_g = hit_plane(ground, ground_normal, ray_source, ray, 50.);
+
+            if 0. < hit_g && 0. < hit_s && hit_g < hit_s {
+                set_fill_style(127, 191, 0);
+            } else if 0. < hit_s {
+                let hit_pos = scale(ray, hit_s);
                 let normal = hit_pos - sphere;
                 let light_dot = dot(light, normal);
                 if light_dot < 0. {
@@ -80,10 +98,10 @@ pub let main() -> void = {
                 } else {
                     set_fill_style(63, 0, 0);
                 }
-            } else if y < 0 {
-                set_fill_style(63, 127, 191 - y);
-            } else {
+            } else if 0. < hit_g {
                 set_fill_style(127, 191 + y, 127);
+            } else {
+                set_fill_style(63, 127, 191 - y);
             }
 
             rectangle((x + pixels) * width, (y + pixels) * width, width, width);
