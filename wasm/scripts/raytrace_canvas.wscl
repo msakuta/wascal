@@ -23,28 +23,63 @@ let normalize(v: Vec3) -> Vec3 = {
     let leng: f64 = sqrt(length2(v));
     Vec3 { x: v.x / leng, y: v.y / leng, z: v.z / leng }
 }
+let scale(v: Vec3, s: f64) -> Vec3 = Vec3 { x: v.x * s, y: v.y * s, z: v.z * s };
+
+let hit_sphere(obj: Vec3, radius: f64, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
+    let del = src - obj;
+
+    let b = dot(dir, del);
+
+    let dirslen = length2(dir);
+    let c = dirslen * (length2(del) - radius * radius);
+
+    let discrim = b * b - c;
+    if discrim > 0. {
+    } else {
+        return -1.;
+    };
+
+    let d = sqrt(discrim);
+
+    if 0. < dirslen {
+        let t0 = (-b - d) / dirslen;
+        let t1 = (-b + d) / dirslen;
+        if t1 < 0. {
+            -1.
+        } else {
+            t0
+        }
+    } else {
+        -1.
+    }
+}
 
 let format_vec3(s: Vec3) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ", " + format_f64(s.z) + ")";
 
 pub let main() -> void = {
+    let ray_source = Vec3 { x: 0., y: 0., z: 0. };
     let sphere = Vec3 { x: 0., y: 0., z: -10. };
-    let light = Vec3 { x: 0.5, y: 1., z: 1. };
-    let radius = 5.;
-    let pixels: i32 = 16;
+    let light = normalize(Vec3 { x: 0.5, y: 1., z: -0.25 });
+    let radius: f64 = 5.;
+    let pixels: i32 = 20;
     let width: i32 = 8;
     for y in -pixels to pixels {
+        let _: i32 = y;
         for x in -pixels to pixels {
 
             let ray = normalize(Vec3 { x: x as f64 / pixels as f64, y: y as f64 / pixels as f64, z: -1. });
 
-            let sp = dot(ray, sphere);
+            let hit_f = hit_sphere(sphere, radius, ray_source, ray, 50.);
 
-            let slen = length2(ray);
-            let c = length2(sphere) - radius * radius;
-
-            let discrim = sp * sp - c;
-            if 0. < discrim {
-                set_fill_style(255, 0, 0);
+            if 0. < hit_f {
+                let hit_pos = scale(ray, hit_f);
+                let normal = hit_pos - sphere;
+                let light_dot = dot(light, normal);
+                if light_dot < 0. {
+                    set_fill_style(255, 0, 0);
+                } else {
+                    set_fill_style(63, 0, 0);
+                }
             } else if y < 0 {
                 set_fill_style(63, 127, 191 - y);
             } else {

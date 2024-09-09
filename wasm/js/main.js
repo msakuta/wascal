@@ -154,9 +154,10 @@ const samples = document.getElementById("samples");
     "funcs.wscl", "log.wscl", "loop.wscl",
     "string.wscl", "strrepeat.wscl",
     "struct.wscl", "struct_infer.wscl", "struct_nested.wscl",
-    "vector.wscl", "field_assign.wscl", "raytrace_canvas.wscl",
+    "vector.wscl", "field_assign.wscl",
     "mandel.wscl",
     "canvas.wscl", "mandel_canvas.wscl",
+    "raytrace.wscl", "raytrace_canvas.wscl",
 ]
     .forEach(fileName => {
     const link = document.createElement("a");

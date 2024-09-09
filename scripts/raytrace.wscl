@@ -23,6 +23,7 @@ let normalize(v: Vec3) -> Vec3 = {
     let leng: f64 = sqrt(length2(v));
     Vec3 { x: v.x / leng, y: v.y / leng, z: v.z / leng }
 }
+let scale(v: Vec3, s: f64) -> Vec3 = Vec3 { x: v.x * s, y: v.y * s, z: v.z * s };
 
 let format_vec3(s: Vec3) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ", " + format_f64(s.z) + ")";
 
@@ -58,9 +59,9 @@ let hit_sphere(obj: Vec3, radius: f64, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
 pub let main() -> void = {
     let ray_source = Vec3 { x: 0., y: 0., z: 0. };
     let sphere = Vec3 { x: 0., y: 0., z: -10. };
-    let light = Vec3 { x: 0.5, y: 1., z: 1. };
+    let light = normalize(Vec3 { x: 0.5, y: 1., z: -0.25 });
     let radius: f64 = 5.;
-    let pixels: i32 = 16;
+    let pixels: i32 = 20;
     let width: i32 = 8;
     for y in -pixels to pixels {
         let _: i32 = y;
@@ -71,7 +72,14 @@ pub let main() -> void = {
             let hit_f = hit_sphere(sphere, radius, ray_source, ray, 50.);
 
             if 0. < hit_f {
-                putc(32)
+                let hit_pos = scale(ray, hit_f);
+                let normal = hit_pos - sphere;
+                let light_dot = dot(light, normal);
+                if light_dot < 0. {
+                    putc(32)
+                } else {
+                    putc(58)
+                }
             } else if y < 0 {
                 putc(46)
             } else {
