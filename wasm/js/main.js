@@ -178,7 +178,7 @@ const samples = document.getElementById("samples");
 
 let initState = EditorState.create({
     extensions: [basicSetup, StreamLanguage.define(Parser)],
-    doc: "pub let hello(x: i32, y: i32) = x + y;",
+    doc: "pub let hello(x: i32, y: i32) = x + y",
 });
 
 let view = new EditorView({
