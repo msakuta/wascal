@@ -75,8 +75,8 @@ pub let main() -> void = {
     let ground_normal = Vec3 { x: 0., y: 1., z: 0.};
     let light = normalize(Vec3 { x: 0.5, y: 1., z: -0.25 });
     let radius: f64 = 5.;
-    let pixels: i32 = 20;
-    let width: i32 = 8;
+    let pixels: i32 = 40;
+    let width: i32 = 4;
     for y in -pixels to pixels {
         let _: i32 = y;
         for x in -pixels to pixels {
