@@ -785,7 +785,9 @@ impl<'a> Compiler<'a> {
             Statement::Expr(ex) => self.emit_expr(ex),
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.emit_expr(ex)?;
-                let ty = ty.determine().expect("type should be determinable");
+                let ty = ty.determine().ok_or_else(|| {
+                    format!("Variable {name} type should be determinable but got {}", ty)
+                })?;
                 self.coerce_type(&ty, &ex_ty).map_err(|_| {
                     format!(
                         "Variable declared type {ty} and initializer type {ex_ty} are different"

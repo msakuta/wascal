@@ -4,7 +4,7 @@ use std::{collections::HashMap, io::Write};
 
 use crate::{
     model::{FuncDef, StructDef, TypeSet},
-    parser::{format_stmt, Expression, Statement},
+    parser::{format_expr, format_stmt, Expression, Statement},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
 };
@@ -99,7 +99,7 @@ impl<'a> TypeInferer<'a> {
                 .locals
                 .get(*name)
                 .cloned()
-                .unwrap_or(TypeSet::default())),
+                .ok_or_else(|| format!("Variable {name} not found"))?),
             Expression::FnInvoke(name, _) => self
                 .funcs
                 .get(*name)
@@ -143,14 +143,31 @@ impl<'a> TypeInferer<'a> {
                 Ok(Type::I32.into())
             }
             Expression::Conditional(_, t_branch, f_branch) => {
-                let t_ty = t_branch
-                    .last()
-                    .map_or(Ok(TypeSet::default()), |stmt| self.forward_type_stmt(stmt))?;
+                let stmts_to_string =
+                    |stmts: &[Statement]| -> Result<String, Box<dyn std::error::Error>> {
+                        let mut buf = vec![];
+                        for stmt in stmts {
+                            format_stmt(stmt, 0, &mut buf)?;
+                            writeln!(&mut buf, "")?;
+                        }
+                        Ok(String::from_utf8(buf)?.replace("\n", " "))
+                    };
+
+                let t_ty = self.forward_type_stmts(t_branch)?;
                 let f_ty = f_branch.as_ref().map_or(Ok(TypeSet::default()), |stmts| {
-                    stmts
-                        .last()
-                        .map_or(Ok(TypeSet::default()), |stmt| self.forward_type_stmt(stmt))
+                    self.forward_type_stmts(stmts)
                 })?;
+                dprintln!(
+                    "forward conditional: {} & {} = {} <: ({}) & ({})",
+                    &t_ty,
+                    &f_ty,
+                    &t_ty & &f_ty,
+                    stmts_to_string(t_branch).unwrap(),
+                    f_branch
+                        .as_ref()
+                        .map(|f| stmts_to_string(f).unwrap())
+                        .unwrap_or_else(|| "?".to_string())
+                );
                 Ok(t_ty & f_ty)
             }
         }
@@ -223,11 +240,13 @@ impl<'a> TypeInferer<'a> {
             }
             Expression::Conditional(cond, t_branch, f_branch) => {
                 self.propagate_type_expr(cond, &Type::I32.into())?;
-                if let Some(t_stmt) = t_branch.last_mut() {
-                    self.propagate_type_stmt(t_stmt, ts)?;
+                for stmt in t_branch.iter_mut().rev() {
+                    self.propagate_type_stmt(stmt, ts)?;
                 }
-                if let Some(f_stmt) = f_branch.as_mut().and_then(|stmts| stmts.last_mut()) {
-                    self.propagate_type_stmt(f_stmt, ts)?;
+                if let Some(f_stmts) = f_branch.as_mut() {
+                    for stmt in f_stmts.iter_mut().rev() {
+                        self.propagate_type_stmt(stmt, ts)?;
+                    }
                 }
             }
         }
@@ -277,6 +296,8 @@ impl<'a> TypeInferer<'a> {
             Statement::Return(ex) => {
                 if let Some(ex) = ex {
                     self.propagate_type_expr(ex, &self.ret_ty.clone())?;
+                } else {
+                    println!("return without expression!!!!!!!");
                 }
             }
             Statement::Struct(_) => {}
@@ -318,6 +339,14 @@ impl<'a> TypeInferer<'a> {
                 Err("Arithmetic expression cannot be a lvalue".to_string())
             }
         }
+    }
+
+    fn forward_type_stmts(&mut self, stmts: &[Statement]) -> Result<TypeSet, String> {
+        let mut last = TypeSet::void();
+        for stmt in stmts {
+            last = self.forward_type_stmt(stmt)?;
+        }
+        Ok(last)
     }
 
     fn forward_type_stmt(&mut self, stmt: &Statement) -> Result<TypeSet, String> {
@@ -365,9 +394,14 @@ impl<'a> TypeInferer<'a> {
                 }
                 Ok(Type::Void.into())
             }
-            Statement::Return(ex) => ex
-                .as_ref()
-                .map_or(Ok(TypeSet::default()), |ex| self.forward_type_expr(ex)),
+            Statement::Return(ex) => {
+                // TODO: constrain the result type with return statements
+                ex.as_ref()
+                    .map_or(Ok(TypeSet::default()), |ex| self.forward_type_expr(ex))?;
+
+                // As a statement, it should not yield any value.
+                Ok(TypeSet::void())
+            }
             _ => Ok(TypeSet::default()),
         }
     }
@@ -474,7 +508,6 @@ pub fn run_type_infer<'src>(
         );
     }
     for func in funcs {
-        // let func_ty = dbg!(&types[func.ty]);
         type_infer_funcs.insert(
             func.name.clone(),
             TypeInferFn {
