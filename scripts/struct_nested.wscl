@@ -8,8 +8,8 @@ struct Mat {
     z: Vec2,
 }
 
-let format_vec(s: Vec2) -> str = format_f64(s.x) + ", " + format_f64(s.y);
-let format_mat(s: Mat) -> str = format_vec(s.w) + ", " + format_vec(s.z);
+let format_vec(s: Vec2) -> str = format_f64(s.x) + ", " + format_f64(s.y)
+let format_mat(s: Mat) -> str = format_vec(s.w) + ", " + format_vec(s.z)
 
 pub let main() -> str = {
     let m = Mat {

@@ -30,7 +30,8 @@ pub enum Expression<'src> {
 pub enum Statement<'src> {
     VarDecl(&'src str, TypeSet, Expression<'src>),
     VarAssign(Expression<'src>, Expression<'src>),
-    Expr(Expression<'src>),
+    /// The second bool indicates if the yielded value should be dropped (semicolon-terminated)
+    Expr(Expression<'src>, bool),
     FnDecl(FnDecl<'src>),
     For(For<'src>),
     Brace(Vec<Statement<'src>>),
@@ -427,7 +428,7 @@ fn else_clause(i: &str) -> IResult<&str, Vec<Statement>> {
     let (r, _) = recognize("else")(space(i))?;
 
     if let Ok((r, next_cond)) = conditional(r) {
-        return Ok((r, vec![Statement::Expr(next_cond)]));
+        return Ok((r, vec![Statement::Expr(next_cond, false)]));
     }
 
     let (r, _) = recognize("{")(space(r))?;
@@ -661,9 +662,9 @@ fn statement(i: &str) -> Result<(&str, Statement), String> {
     let (r, res) = expression(r)?;
 
     if let Ok((r, _)) = recognize(";")(space(r)) {
-        return Ok((r, Statement::Expr(res)));
+        return Ok((r, Statement::Expr(res, true)));
     }
-    return Ok((r, Statement::Expr(res)));
+    return Ok((r, Statement::Expr(res, false)));
 }
 
 fn brace_statement(i: &str) -> IResult<&str, Vec<Statement>> {
@@ -811,10 +812,13 @@ pub fn format_stmt(
             format_expr(ex, level, f)?;
             writeln!(f, ";")
         }
-        Statement::Expr(ex) => {
+        Statement::Expr(ex, semicolon) => {
             write!(f, "{indent}")?;
             format_expr(ex, level, f)?;
-            writeln!(f, ";")
+            if *semicolon {
+                writeln!(f, ";")?;
+            }
+            Ok(())
         }
         Statement::Brace(stmts) => {
             writeln!(f, "{indent}{{")?;

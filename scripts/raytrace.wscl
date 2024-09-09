@@ -17,15 +17,17 @@ let __sub__(lhs: Vec3, rhs: Vec3) = Vec3 {
     z: lhs.z - rhs.z,
 }
 
-let dot(lhs: Vec3, rhs: Vec3) -> f64 = lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
-let length2(v: Vec3) -> f64 = dot(v, v);
+let neg(v: Vec3) = Vec3 { x: -v.x, y: -v.y, z: -v.z }
+
+let dot(lhs: Vec3, rhs: Vec3) -> f64 = lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z
+let length2(v: Vec3) -> f64 = dot(v, v)
 let normalize(v: Vec3) -> Vec3 = {
     let leng: f64 = sqrt(length2(v));
     Vec3 { x: v.x / leng, y: v.y / leng, z: v.z / leng }
 }
-let scale(v: Vec3, s: f64) -> Vec3 = Vec3 { x: v.x * s, y: v.y * s, z: v.z * s };
+let scale(v: Vec3, s: f64) -> Vec3 = Vec3 { x: v.x * s, y: v.y * s, z: v.z * s }
 
-let format_vec3(s: Vec3) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ", " + format_f64(s.z) + ")";
+let format_vec3(s: Vec3) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ", " + format_f64(s.z) + ")"
 
 let hit_sphere(obj: Vec3, radius: f64, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
     let del = src - obj;
@@ -60,6 +62,9 @@ let hit_plane(obj: Vec3, normal: Vec3, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
     let delta = src - obj;
     let dist = dot(delta, normal);
     let ray_speed = dot(dir, normal);
+    if ray_speed < 0.000001 {
+        return -1.;
+    }
     let t = -dist / ray_speed;
     if t < 0. && dt < t {
         -1.
@@ -68,9 +73,18 @@ let hit_plane(obj: Vec3, normal: Vec3, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
     }
 }
 
+let ground_color(hit_pos: Vec3, light: Vec3, sphere: Vec3, radius: f64) -> void = {
+    let hit_l = hit_sphere(sphere, radius, hit_pos, neg(light), 50.);
+    if 0. < hit_l {
+        putc(35);
+    } else {
+        putc(63);
+    }
+}
+
 pub let main() -> void = {
     let ray_source = Vec3 { x: 0., y: 0., z: 0. };
-    let sphere = Vec3 { x: 0., y: 0., z: -10. };
+    let sphere = Vec3 { x: 0., y: 0., z: -8. };
     let ground = Vec3 { x: 0., y: 2., z: 0. };
     let ground_normal = Vec3 { x: 0., y: 1., z: 0.};
     let light = normalize(Vec3 { x: 0.5, y: 1., z: -0.25 });
@@ -88,20 +102,20 @@ pub let main() -> void = {
             let hit_g = hit_plane(ground, ground_normal, ray_source, ray, 50.);
 
             if 0. < hit_g && 0. < hit_s && hit_g < hit_s {
-                putc(64)
+                ground_color(scale(ray, hit_g), light, sphere, radius);
             } else if 0. < hit_s {
                 let hit_pos = scale(ray, hit_s);
                 let normal = hit_pos - sphere;
                 let light_dot = dot(light, normal);
                 if light_dot < 0. {
-                    putc(32)
+                    putc(32);
                 } else {
-                    putc(58)
+                    putc(58);
                 }
             } else if 0. < hit_g {
-                putc(42)
+                ground_color(scale(ray, hit_g), light, sphere, radius);
             } else {
-                putc(46)
+                putc(46);
             };
 
         }

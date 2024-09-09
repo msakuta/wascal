@@ -3,4 +3,4 @@ let t(s: i32) -> i32 = {
     v * 2
 }
 
-pub let hello(x: i32, y: i32, z: i32) = t(x) / y + z;
+pub let hello(x: i32, y: i32, z: i32) = t(x) / y + z

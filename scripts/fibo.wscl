@@ -2,4 +2,4 @@ pub let fibo(x: i32) -> i32 = if x < 2 {
     1
 } else {
     fibo(x - 1) + fibo(x - 2)
-};
+}

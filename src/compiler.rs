@@ -782,7 +782,15 @@ impl<'a> Compiler<'a> {
     /// Returns if a value is pushed to the stack
     fn emit_stmt(&mut self, stmt: &Statement, ty: &Type) -> Result<Type, String> {
         match stmt {
-            Statement::Expr(ex) => self.emit_expr(ex),
+            Statement::Expr(ex, semicolon) => {
+                let ex_ty = self.emit_expr(ex)?;
+                if *semicolon {
+                    self.coerce_type(&Type::Void, &ex_ty)?;
+                    Ok(Type::Void)
+                } else {
+                    Ok(ex_ty)
+                }
+            }
             Statement::VarDecl(name, ty, ex) => {
                 let ex_ty = self.emit_expr(ex)?;
                 let ty = ty.determine().ok_or_else(|| {

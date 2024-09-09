@@ -4,7 +4,7 @@ struct Vec2 {
     y: f64,
 }
 
-let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ")";
+let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ")"
 
 pub let main() -> str = {
     let vec = Vec2 { x: 1., y: 2. };

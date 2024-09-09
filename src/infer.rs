@@ -267,7 +267,8 @@ impl<'a> TypeInferer<'a> {
                 let var_ts = self.forward_type_expr(lhs)?;
                 self.propagate_type_expr(ex, &var_ts.clone())?;
             }
-            Statement::Expr(ex) => self.propagate_type_expr(ex, ts)?,
+            Statement::Expr(ex, false) => self.propagate_type_expr(ex, ts)?,
+            Statement::Expr(ex, true) => self.propagate_type_expr(ex, &TypeSet::void())?,
             Statement::Brace(stmts) => {
                 if let Some(stmt) = stmts.last_mut() {
                     self.propagate_type_stmt(stmt, ts)?;
@@ -351,7 +352,11 @@ impl<'a> TypeInferer<'a> {
 
     fn forward_type_stmt(&mut self, stmt: &Statement) -> Result<TypeSet, String> {
         match stmt {
-            Statement::Expr(ex) => self.forward_type_expr(ex),
+            Statement::Expr(ex, false) => self.forward_type_expr(ex),
+            Statement::Expr(ex, true) => {
+                self.forward_type_expr(ex)?;
+                Ok(TypeSet::void())
+            }
             Statement::VarDecl(name, decl_ty, ex) => {
                 if self.locals.get(*name).is_some() {
                     return Err(format!("Redeclaration of a variable {name}"));

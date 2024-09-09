@@ -1,1 +1,1 @@
-pub let hello() -> i32 = 0 / 0;
+pub let hello() -> i32 = 0 / 0
