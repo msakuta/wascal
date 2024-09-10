@@ -156,23 +156,31 @@ fn peek_char(input: &str) -> Option<char> {
 
 /// Matches zero or more spaces. Used for skipping potential spaces.
 fn space(mut i: &str) -> &str {
-    while peek_char(i).is_some_and(|c| c.is_whitespace()) {
-        i = advance_char(i);
+    loop {
+        if peek_char(i).is_some_and(|c| c.is_whitespace()) {
+            i = advance_char(i);
+            continue;
+        }
+
+        // Line comments
+        if 2 <= i.len() && &i[..2] == "//" {
+            while peek_char(i).is_some_and(|c| c != '\n') {
+                i = advance_char(i);
+            }
+            continue;
+        }
+        break;
     }
     i
 }
 
 /// Matches one or more spaces. Used when a space is expected, e.g. after an identifier.
 fn space1(mut i: &str) -> Result<&str, String> {
-    let c = peek_char(i).ok_or_else(|| "Expected one or more spaces")?;
-    if !c.is_whitespace() {
-        return Err("Expected a whitespace".to_string());
+    let ret = space(i);
+    if ret == i {
+        return Err("Expected one or more spaces".to_string());
     }
-    i = advance_char(i);
-    while peek_char(i).is_some_and(|c| c.is_whitespace()) {
-        i = advance_char(i);
-    }
-    Ok(i)
+    Ok(ret)
 }
 
 fn identifier(mut input: &str) -> Result<(&str, &str), String> {

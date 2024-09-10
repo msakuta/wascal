@@ -1,14 +1,17 @@
 
+// A 2D vector.
 struct Vec2 {
     x: f64,
     y: f64,
 }
 
+// Operator overloading for "+"
 let __add__(lhs: Vec2, rhs: Vec2) = Vec2 {
     x: lhs.x + rhs.x,
     y: lhs.y + rhs.y,
 }
 
+// Operator overloading for "-"
 let __sub__(lhs: Vec2, rhs: Vec2) = Vec2 {
     x: lhs.x - rhs.x,
     y: lhs.y - rhs.y,
