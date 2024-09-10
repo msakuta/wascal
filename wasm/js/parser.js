@@ -27,11 +27,21 @@ function readBracket(stream) {
 
 function normal(stream, state) {
     var ch = stream.next();
-    if (ch == "/" && stream.eat("/")) {
-        // if (stream.eat("[") && stream.eat("["))
-        // return (state.cur = bracketed(readBracket(stream), "comment"))(stream, state);
+    if (ch === "/" && stream.eat("/")) {
         stream.skipToEnd();
         return "comment";
+    }
+    if (ch === "/" && stream.eat("*")) {
+        state.cur = (stream, state) => {
+            while ((ch = stream.next()) != null) {
+                if (ch == "*" && stream.eat("/")) {
+                    state.cur = normal;
+                    return "blockComment"
+                }
+            }
+            return "blockComment"
+        }
+        return "blockComment";
     }
     if (ch == "\"" || ch == "'")
         return (state.cur = string(ch))(stream, state);
