@@ -27,12 +27,12 @@ function readBracket(stream) {
 
 function normal(stream, state) {
     var ch = stream.next();
-    // if (ch == "-" && stream.eat("-")) {
-    //     if (stream.eat("[") && stream.eat("["))
-    //     return (state.cur = bracketed(readBracket(stream), "comment"))(stream, state);
-    //     stream.skipToEnd();
-    //     return "comment";
-    // }
+    if (ch == "/" && stream.eat("/")) {
+        // if (stream.eat("[") && stream.eat("["))
+        // return (state.cur = bracketed(readBracket(stream), "comment"))(stream, state);
+        stream.skipToEnd();
+        return "comment";
+    }
     if (ch == "\"" || ch == "'")
         return (state.cur = string(ch))(stream, state);
     if (ch == "[" && /[\[=]/.test(stream.peek()))
@@ -102,6 +102,6 @@ export const Parser = {
   
     languageData: {
       indentOnInput: /^\s*(?:else|\)|\})$/,
-    //   commentTokens: {line: "--", block: {open: "--[[", close: "]]--"}}
+      commentTokens: {line: "--", block: {open: "--[[", close: "]]--"}}
     }
 };
