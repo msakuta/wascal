@@ -19,6 +19,7 @@ let __sub__(lhs: Vec2, rhs: Vec2) = Vec2 {
 
 let dot(lhs: Vec2, rhs: Vec2) = lhs.x * rhs.x + lhs.y * rhs.y
 
+/* String formatting of a vector. */
 let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ")"
 
 pub let main() -> f64 = {

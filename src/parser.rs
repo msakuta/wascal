@@ -162,20 +162,36 @@ fn space(mut i: &str) -> &str {
             continue;
         }
 
-        // Line comments
-        if 2 <= i.len() && &i[..2] == "//" {
+        // Line comments.
+        // We know it starts with ascii substring, so we obtain as_bytes() to avoid utf-8 decoding,
+        // otherwise we may panic at the boundary of bytes that make a utf-8 character.
+        // Note that this trick only works with utf-8, which has no valid ascii characters as part of
+        // a multi-byte character.
+        if 2 <= i.len() && &i.as_bytes()[..2] == b"//" {
+            i = &i[2..];
             while peek_char(i).is_some_and(|c| c != '\n') {
                 i = advance_char(i);
             }
             continue;
         }
+
+        // Block comments
+        if 2 <= i.len() && &i.as_bytes()[..2] == b"/*" {
+            i = &i[2..];
+            while 2 <= i.len() && &i.as_bytes()[..2] != b"*/" {
+                i = advance_char(i);
+            }
+            i = &i[2..];
+            continue;
+        }
+
         break;
     }
     i
 }
 
 /// Matches one or more spaces. Used when a space is expected, e.g. after an identifier.
-fn space1(mut i: &str) -> Result<&str, String> {
+fn space1(i: &str) -> Result<&str, String> {
     let ret = space(i);
     if ret == i {
         return Err("Expected one or more spaces".to_string());
