@@ -207,8 +207,9 @@ impl<'a> TypeInferer<'a> {
                     self.propagate_type_expr(arg, &ts.clone().into())?;
                 }
             }
-            Expression::Cast(_ex, _ty) => {
+            Expression::Cast(ex, _ty) => {
                 // Cast will not propagate type constraints
+                self.propagate_type_expr(ex, &TypeSet::all())?;
             }
             Expression::FieldAccess(_ex, _ty) => {
                 // Field access will not propagate type constraints because struct types should be determinate
