@@ -1,4 +1,5 @@
 mod alloca;
+mod count_stack;
 mod disasm;
 mod emit;
 mod malloc;
@@ -248,7 +249,13 @@ pub struct Compiler<'a> {
     /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
     structs: &'a HashMap<String, StructDef>,
+    local_ty: HashMap<String, Type>,
+    /// A local index indicating the base pointer, the address of the bottom of the linear memory stack.
     base_ptr: usize,
+    /// An accumulator to keep track of how many bytes are used in the stack in emit_*
+    base_offset: usize,
+    /// The size of the linear memory stack, in bytes, not to be confused with the locals
+    stack_size: usize,
 }
 
 impl<'a> Compiler<'a> {
@@ -260,7 +267,12 @@ impl<'a> Compiler<'a> {
         const_table: &'a mut ConstTable,
         funcs: &'a mut Vec<FuncDef>,
         structs: &'a HashMap<String, StructDef>,
-    ) -> Self {
+    ) -> Result<Self, String> {
+        let local_ty = args
+            .iter()
+            .map(|arg| Some((arg.name.clone(), arg.ty.clone().determine()?)))
+            .collect::<Option<_>>()
+            .ok_or_else(|| format!("Argument type could not be determined"))?;
         let mut locals = args;
         let args = locals.len();
         if matches!(ret_ty, Type::Struct(_)) {
@@ -269,7 +281,7 @@ impl<'a> Compiler<'a> {
                 ty: ret_ty.clone().into(),
             });
         }
-        Self {
+        Ok(Self {
             code: vec![],
             args,
             locals,
@@ -279,23 +291,28 @@ impl<'a> Compiler<'a> {
             const_table,
             funcs,
             structs,
+            local_ty,
             base_ptr: 0,
-        }
+            base_offset: 0,
+            stack_size: 0,
+        })
     }
 
     pub fn compile(&mut self, ast: &[Statement], ty: Type) -> Result<Type, String> {
-        // Remember base pointer, the address of the top of the stack before calling this function.
-        // It forms a stack in linear memory. Not to be confused with operand stack in Wasm runtime.
-        self.i32const(4);
-        self.i32load(0)?;
-        self.base_ptr = self.add_local("", Type::I32);
-        // self.code.push(OpCode::I32Const as u8);
-        // encode_leb128(&mut self.code, 1).unwrap();
-        // self.code.push(OpCode::I32Add as u8);
-        // self.i32store()?;
+        self.stack_size = self.count_stack_stmts(ast)?;
 
-        // self.code.push(OpCode::LocalGet as u8);
-        // encode_leb128(&mut self.code, 0).unwrap();
+        println!("stack size is {}", self.stack_size);
+
+        if 0 < self.stack_size {
+            // Remember base pointer, the address of the top of the stack before calling this function.
+            // It forms a stack in linear memory. Not to be confused with operand stack in Wasm runtime.
+            self.i32const(4);
+            self.i32load(0)?;
+            self.base_ptr = self.add_local("", Type::I32);
+            self.i32const(self.stack_size as u32);
+            self.call_func("alloca")?;
+            self.code.push(OpCode::Drop as u8);
+        }
 
         let last = self.emit_stmts(ast, &ty)?;
 
@@ -328,10 +345,12 @@ impl<'a> Compiler<'a> {
             }
         }
 
-        // Restore base pointer
-        self.i32const(4);
-        self.local_get(self.base_ptr);
-        self.i32store(0)?;
+        if 0 < self.stack_size {
+            // Restore base pointer
+            self.i32const(4);
+            self.local_get(self.base_ptr);
+            self.i32store(0)?;
+        }
 
         Ok(())
     }
@@ -422,45 +441,35 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Struct {stname} not found"));
                 };
 
-                let Some((i_alloca, _)) = self
-                    .funcs
-                    .iter()
-                    .enumerate()
-                    .find(|(_, fn_def)| fn_def.name == "alloca")
-                else {
-                    return Err("alloca not found".to_string());
-                };
-
-                let idx_malloc = self.imports.len() + i_alloca;
-
-                self.i32const(stdef.size as u32);
-
-                self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, idx_malloc as u32).unwrap();
-
-                let ptr = self.add_local("", Type::Struct(stname.to_string()));
-
                 for (fname, field) in fields {
-                    self.local_get(ptr);
+                    self.local_get(self.base_ptr);
                     let ex = self.emit_expr(field)?;
                     let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname)
                     else {
                         return Err(format!("Struct field {fname} not found"));
                     };
-                    self.code.push(match ex {
-                        Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Store,
-                        Type::I64 => OpCode::I64Store,
-                        Type::F32 => OpCode::F32Store,
-                        Type::F64 => OpCode::F64Store,
-                        Type::Void => {
-                            return Err(format!("Struct field {} has a void type", stfield.name))
-                        }
-                    } as u8);
-                    encode_leb128(&mut self.code, 0).unwrap();
-                    encode_leb128(&mut self.code, stfield.offset as u32).unwrap();
+                    self.store(
+                        match ex {
+                            Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Store,
+                            Type::I64 => OpCode::I64Store,
+                            Type::F32 => OpCode::F32Store,
+                            Type::F64 => OpCode::F64Store,
+                            Type::Void => {
+                                return Err(format!(
+                                    "Struct field {} has a void type",
+                                    stfield.name
+                                ))
+                            }
+                        },
+                        (self.base_offset + stfield.offset) as u32,
+                    )?;
                 }
 
-                self.local_get(ptr);
+                self.local_get(self.base_ptr);
+                self.i32const(self.base_offset as u32);
+                self.code.push(OpCode::I32Add as u8);
+
+                self.base_offset += stdef.size;
 
                 Ok(Type::Struct(stname.to_string()))
             }
@@ -830,7 +839,6 @@ impl<'a> Compiler<'a> {
             idx = i + self.imports.len();
             ret_ty = func.ret_ty.clone();
             func_def = Some(func);
-            println!("Calling {} returning {}", func.name, ret_ty);
         } else {
             return None;
         };
@@ -845,10 +853,14 @@ impl<'a> Compiler<'a> {
                 .get(stname)
                 .ok_or_else(|| format!("Struct {stname} is not found"))?;
             println!("Calling function returning a struct {stname}");
-            self.i32const(st.size as u32);
-            self.call_func("alloca")?;
+            self.local_get(self.base_ptr);
+            self.i32const(self.base_offset as u32);
+            self.code.push(OpCode::I32Add as u8);
             let local = self.add_local("", ret_ty.clone());
             self.local_get(local);
+
+            self.base_offset += st.size;
+
             Some(local)
         } else {
             None

@@ -32,7 +32,7 @@ impl<'a> Compiler<'a> {
             const_table,
             funcs,
             &structs,
-        );
+        )?;
         compiler.local_get(0);
         let ret = compiler.codegen_malloc()?;
         compiler.local_get(ret);

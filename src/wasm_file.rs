@@ -308,7 +308,8 @@ fn codegen(
             &mut const_table,
             &mut funcs,
             &structs,
-        );
+        )
+        .map_err(CompileError::Compile)?;
         if let Err(e) = compiler.compile(&func_stmt.stmts, ret_ty) {
             return Err(CompileError::Compile(format!(
                 "Error in compiling function {}: {e}",
