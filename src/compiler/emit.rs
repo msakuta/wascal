@@ -7,7 +7,7 @@ use super::{encode_leb128, encode_sleb128, Compiler, OpCode};
 impl<'a> Compiler<'a> {
     pub(super) fn i32const(&mut self, val: u32) {
         self.code.push(OpCode::I32Const as u8);
-        encode_leb128(&mut self.code, val).unwrap();
+        encode_sleb128(&mut self.code, val).unwrap();
     }
 
     #[allow(dead_code)]
