@@ -253,23 +253,31 @@ fn codegen(
                 func_stmt.ret_ty
             ))
         })?;
+
+        let mut params = func_stmt
+            .params
+            .iter()
+            .map(|param| param.ty.determine())
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| {
+                CompileError::Compile("Function argument type could not be determined".to_string())
+            })?;
+
+        // If return type is non-primitive, push a return pointer
+        if matches!(ret_ty, Type::Struct(_)) {
+            println!("Func statement {} returning struct", func_stmt.name);
+            params.push(Type::I32);
+        }
+
         types.push(FuncType {
-            params: func_stmt
-                .params
-                .iter()
-                .map(|param| param.ty.determine())
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| {
-                    CompileError::Compile(
-                        "Function argument type could not be determined".to_string(),
-                    )
-                })?,
-            results: if ret_ty != Type::Void {
+            params,
+            results: if !matches!(ret_ty, Type::Void | Type::Struct(_)) {
                 vec![ret_ty.clone()]
             } else {
                 vec![]
             },
         });
+
         let func = FuncDef {
             name: func_stmt.name.to_string(),
             ty,
@@ -359,6 +367,15 @@ fn compile_std_lib(
     funcs: &mut Vec<FuncDef>,
     disasm_f: &mut Option<&mut dyn Write>,
 ) -> CompileResult<()> {
+    let (alloca_ty, alloca_fn) = Compiler::alloca(types, imports, const_table, funcs)
+        .map_err(|e| CompileError::Compile(e))?;
+
+    if let Some(ref mut disasm_f) = disasm_f {
+        let func_ty = &types[alloca_ty];
+
+        disasm_func(&funcs[alloca_fn], &func_ty, disasm_f)?;
+    }
+
     let (malloc_ty, malloc_fn) = Compiler::malloc(types, imports, const_table, funcs)
         .map_err(|e| CompileError::Compile(e))?;
 

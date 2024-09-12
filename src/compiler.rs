@@ -1,3 +1,4 @@
+mod alloca;
 mod disasm;
 mod emit;
 mod malloc;
@@ -7,6 +8,8 @@ mod sqrt;
 mod strcat;
 
 use std::{collections::HashMap, io::Write};
+
+use self::emit::{to_load, to_store};
 
 use crate::{
     const_table::ConstTable,
@@ -236,6 +239,7 @@ enum LValue {
 /// so you need multiple instances of this object.
 pub struct Compiler<'a> {
     code: Vec<u8>,
+    args: usize,
     locals: Vec<VarDecl>,
     ret_ty: Type,
     types: &'a mut Vec<FuncType>,
@@ -244,6 +248,7 @@ pub struct Compiler<'a> {
     /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
     structs: &'a HashMap<String, StructDef>,
+    base_ptr: usize,
 }
 
 impl<'a> Compiler<'a> {
@@ -256,9 +261,17 @@ impl<'a> Compiler<'a> {
         funcs: &'a mut Vec<FuncDef>,
         structs: &'a HashMap<String, StructDef>,
     ) -> Self {
-        let locals = args;
+        let mut locals = args;
+        let args = locals.len();
+        if matches!(ret_ty, Type::Struct(_)) {
+            locals.push(VarDecl {
+                name: "return".to_string(),
+                ty: ret_ty.clone().into(),
+            });
+        }
         Self {
             code: vec![],
+            args,
             locals,
             ret_ty,
             types,
@@ -266,14 +279,16 @@ impl<'a> Compiler<'a> {
             const_table,
             funcs,
             structs,
+            base_ptr: 0,
         }
     }
 
     pub fn compile(&mut self, ast: &[Statement], ty: Type) -> Result<Type, String> {
-        // self.i32const(0);
-        // self.code.push(OpCode::I32Const as u8);
-        // encode_leb128(&mut self.code, 0).unwrap();
-        // self.i32load()?;
+        // Remember base pointer, the address of the top of the stack before calling this function.
+        // It forms a stack in linear memory. Not to be confused with operand stack in Wasm runtime.
+        self.i32const(4);
+        self.i32load(0)?;
+        self.base_ptr = self.add_local("", Type::I32);
         // self.code.push(OpCode::I32Const as u8);
         // encode_leb128(&mut self.code, 1).unwrap();
         // self.code.push(OpCode::I32Add as u8);
@@ -284,11 +299,45 @@ impl<'a> Compiler<'a> {
 
         let last = self.emit_stmts(ast, &ty)?;
 
+        self.return_code()?;
+
         self.code.push(OpCode::End as u8);
         Ok(last)
     }
 
-    fn find_func(&self, name: &str) -> Result<(usize, Type), String> {
+    fn return_code(&mut self) -> Result<(), String> {
+        // The calling convention for non-primitive type is that
+        //   <arg0> <arg1> ... <arg n-1> <return_addr>
+        // where return_addr points to the calling function's stack address that
+        // holds the result.
+        // TODO: RVO
+        if let Some(stname) = self.ret_ty.struct_name() {
+            let st = self
+                .structs
+                .get(stname)
+                .ok_or_else(|| format!("Struct {stname} not found"))?;
+            let local_buf = self.add_local("", Type::I32);
+            let ret_buf = self.args;
+            for field in &st.fields {
+                if let Some((store_op, load_op)) = to_store(&field.ty).zip(to_load(&field.ty)) {
+                    self.local_get(ret_buf);
+                    self.local_get(local_buf);
+                    self.load(load_op, field.offset as u32)?;
+                    self.store(store_op, field.offset as u32)?;
+                }
+            }
+        }
+
+        // Restore base pointer
+        self.i32const(4);
+        self.local_get(self.base_ptr);
+        self.i32store(0)?;
+
+        Ok(())
+    }
+
+    /// Find a function defined in this Wasm module, i.e. not an imported function.
+    fn find_local_func(&self, name: &str) -> Result<(usize, Type), String> {
         let (idx, ret) = self
             .funcs
             .iter()
@@ -307,7 +356,7 @@ impl<'a> Compiler<'a> {
 
     /// Find and call a function with a name
     fn call_func(&mut self, name: &str) -> Result<Type, String> {
-        let (func_id, ret_ty) = self.find_func(name)?;
+        let (func_id, ret_ty) = self.find_local_func(name)?;
         self.code.push(OpCode::Call as u8);
         encode_leb128(&mut self.code, func_id as u32).map_err(|e| e.to_string())?;
         Ok(ret_ty)
@@ -373,16 +422,16 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Struct {stname} not found"));
                 };
 
-                let Some((i_malloc, _)) = self
+                let Some((i_alloca, _)) = self
                     .funcs
                     .iter()
                     .enumerate()
-                    .find(|(_, fn_def)| fn_def.name == "malloc")
+                    .find(|(_, fn_def)| fn_def.name == "alloca")
                 else {
-                    return Err("malloc not found".to_string());
+                    return Err("alloca not found".to_string());
                 };
 
-                let idx_malloc = self.imports.len() + i_malloc;
+                let idx_malloc = self.imports.len() + i_alloca;
 
                 self.i32const(stdef.size as u32);
 
@@ -427,36 +476,17 @@ impl<'a> Compiler<'a> {
                 Ok(ty)
             }
             Expression::FnInvoke(name, args) => {
-                let idx;
-                let ret_ty;
-                if let Some((i, import)) = self
-                    .imports
-                    .iter()
-                    .enumerate()
-                    .find(|(_, f)| f.name == *name)
-                {
-                    idx = i;
-                    ret_ty = self.types[import.ty]
-                        .results
-                        .get(0)
-                        .cloned()
-                        .unwrap_or(Type::Void);
-                } else if let Some((i, func)) =
-                    self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
-                {
-                    idx = i + self.imports.len();
-                    ret_ty = func.ret_ty.clone();
-                } else {
-                    return Err(format!("Calling undefined function {}", name));
-                };
                 for arg in args {
                     if Type::Void == self.emit_expr(arg)? {
                         return Err("Function argument requires a value".to_string());
                     }
                 }
-                self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, idx as u32).unwrap();
-                Ok(ret_ty)
+
+                let (func_idx, ret_ty, _) = self
+                    .find_func(name)
+                    .ok_or_else(|| format!("Calling undefined function {name}"))?;
+
+                self.emit_call_func(func_idx, ret_ty)
             }
             Expression::Cast(ex, ty) => {
                 let ex_ty = self.emit_expr(ex)?;
@@ -724,24 +754,21 @@ impl<'a> Compiler<'a> {
             }
             (Type::Struct(_), Type::Struct(_)) => {
                 let dunder = format!("__{name}__");
-                let (func_idx, func) = self
-                    .funcs
-                    .iter()
-                    .enumerate()
-                    .find(|(_, func)| func.name == dunder)
-                    .ok_or_else(|| format!("{dunder} was not found"))?;
-                if func.locals.get(0).map(|lo| &lo.ty) != Some(&lhs.clone().into()) {
-                    return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                let (func_idx, ret_ty, func) = self
+                    .find_func(&dunder)
+                    .ok_or_else(|| format!("Calling undefined function {}", dunder))?;
+                if let Some(func) = func {
+                    if func.locals.get(0).map(|lo| &lo.ty) != Some(&lhs.clone().into()) {
+                        return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                    }
+                    if func.locals.get(1).map(|lo| &lo.ty) != Some(&rhs.clone().into()) {
+                        return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                    }
                 }
-                if func.locals.get(1).map(|lo| &lo.ty) != Some(&rhs.clone().into()) {
-                    return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
-                }
-                let func_id = self.imports.len() + func_idx;
 
-                self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, func_id as u32).map_err(|e| e.to_string())?;
+                let ret_ty = self.emit_call_func(func_idx, ret_ty)?;
 
-                return Ok(func.ret_ty.clone());
+                return Ok(ret_ty);
             }
             _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
         };
@@ -777,6 +804,64 @@ impl<'a> Compiler<'a> {
         };
         self.code.push(op as u8);
         Ok(Type::I32)
+    }
+
+    /// Find a function by name, either user defined or imported, and return its index, return type
+    /// and optionally a reference to FuncDef, if it is user defined function.
+    fn find_func(&self, name: &str) -> Option<(usize, Type, Option<&FuncDef>)> {
+        let idx;
+        let ret_ty;
+        let func_def;
+        if let Some((i, import)) = self
+            .imports
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == *name)
+        {
+            idx = i;
+            ret_ty = self.types[import.ty]
+                .results
+                .get(0)
+                .cloned()
+                .unwrap_or(Type::Void);
+            func_def = None;
+        } else if let Some((i, func)) = self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
+        {
+            idx = i + self.imports.len();
+            ret_ty = func.ret_ty.clone();
+            func_def = Some(func);
+            println!("Calling {} returning {}", func.name, ret_ty);
+        } else {
+            return None;
+        };
+        Some((idx, ret_ty, func_def))
+    }
+
+    fn emit_call_func(&mut self, func_idx: usize, ret_ty: Type) -> Result<Type, String> {
+        // If the returned value is a struct, allocate memory on the calling function
+        let ret_local = if let Some(stname) = ret_ty.struct_name() {
+            let st = self
+                .structs
+                .get(stname)
+                .ok_or_else(|| format!("Struct {stname} is not found"))?;
+            println!("Calling function returning a struct {stname}");
+            self.i32const(st.size as u32);
+            self.call_func("alloca")?;
+            let local = self.add_local("", ret_ty.clone());
+            self.local_get(local);
+            Some(local)
+        } else {
+            None
+        };
+
+        self.code.push(OpCode::Call as u8);
+        encode_leb128(&mut self.code, func_idx as u32).unwrap();
+
+        if let Some(ret_local) = ret_local {
+            self.local_get(ret_local);
+        }
+
+        Ok(ret_ty)
     }
 
     /// Returns if a value is pushed to the stack

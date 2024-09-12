@@ -105,7 +105,7 @@ document.getElementById("compile").addEventListener("click", () => runCommon(asy
     console.log(`bind: ${Object.getOwnPropertyNames(bind.exports)}`);
     for (const expName in bind.exports) {
         // Skip useless functions from UI
-        if (0 <= ["malloc", "set", "strcat", "reverse", "sqrt"].indexOf(expName)) continue;
+        if (0 <= ["alloca", "malloc", "set", "strcat", "reverse", "sqrt"].indexOf(expName)) continue;
         const expFunc = bind.exports[expName];
         if (typeof expFunc !== "function") continue;
         const funcElem = document.createElement("div");
