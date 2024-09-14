@@ -625,6 +625,10 @@ pub fn default_types() -> Vec<FuncType> {
             params: vec![Type::F64],
             results: vec![Type::Str],
         },
+        FuncType {
+            params: vec![Type::Str],
+            results: vec![],
+        },
     ]
 }
 
@@ -638,7 +642,7 @@ pub fn default_imports() -> Vec<FuncImport> {
         FuncImport {
             module: "output".to_string(),
             name: "print".to_string(),
-            ty: 0,
+            ty: 2,
         },
         FuncImport {
             module: "output".to_string(),
