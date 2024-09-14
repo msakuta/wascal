@@ -441,15 +441,18 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Struct {stname} not found"));
                 };
 
-                for (fname, field) in fields {
-                    self.local_get(self.base_ptr);
-                    let ex = self.emit_expr(field)?;
-                    let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname)
-                    else {
-                        return Err(format!("Struct field {fname} not found"));
-                    };
-                    self.store(
-                        match ex {
+                // We need to collect to a vec because self.base_ptr can change
+                let fields = fields
+                    .into_iter()
+                    .map(|(fname, field)| {
+                        self.local_get(self.base_ptr);
+                        let ex = self.emit_expr(field)?;
+                        let stfield = stdef
+                            .fields
+                            .iter()
+                            .find(|field| &field.name == fname)
+                            .ok_or_else(|| format!("Struct field {fname} not found"))?;
+                        let op = match ex {
                             Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Store,
                             Type::I64 => OpCode::I64Store,
                             Type::F32 => OpCode::F32Store,
@@ -460,9 +463,14 @@ impl<'a> Compiler<'a> {
                                     stfield.name
                                 ))
                             }
-                        },
-                        (self.base_offset + stfield.offset) as u32,
-                    )?;
+                        };
+                        Ok((op, stfield))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                // reverse because values are pushed to stack
+                for (op, stfield) in fields.into_iter().rev() {
+                    self.store(op, (self.base_offset + stfield.offset) as u32)?;
                 }
 
                 self.local_get(self.base_ptr);

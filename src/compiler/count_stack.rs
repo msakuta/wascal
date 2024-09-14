@@ -20,11 +20,13 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Struct {stname} not found"));
                 };
 
-                println!("String literal size {}", stdef.size);
+                println!("Struct literal {stname} size {}", stdef.size);
 
                 let mut stack_size = stdef.size;
-                for (_, field) in fields {
-                    stack_size += self.count_stack_expr(field)?;
+                for (fname, field) in fields {
+                    let field_sz = self.count_stack_expr(field)?;
+                    println!("Struct field {fname} size {field_sz}");
+                    stack_size += field_sz;
                 }
                 stack_size
             }

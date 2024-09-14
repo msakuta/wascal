@@ -63,6 +63,7 @@ pub(crate) fn decode_leb128(f: &mut impl Read) -> std::io::Result<i32> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn decode_sleb128(f: &mut impl Read) -> std::io::Result<i32> {
     let mut value = 0u32;
     let mut shift = 0;
