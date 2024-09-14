@@ -44,47 +44,85 @@ impl From<std::io::Error> for CompileError {
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
-/// `bind_module` indicates whether to use ES6 module for binding JS code.
-pub fn compile_wasm(
-    f: &mut impl Write,
-    bind: &mut impl Write,
+pub struct WasmCompiler<'a> {
+    source: &'a str,
+    types: Vec<FuncType>,
+    imports: Vec<FuncImport>,
     bind_module: bool,
-    source: &str,
-    types: &mut Vec<FuncType>,
-    imports: &[FuncImport],
-    disasm_f: Option<&mut dyn Write>,
-    typeinf_f: Option<&mut dyn Write>,
+    disasm_f: Option<&'a mut dyn Write>,
+    typeinf_f: Option<&'a mut dyn Write>,
     debug_type_infer: bool,
-) -> CompileResult<()> {
-    f.write_all(b"\0asm")?;
-    f.write_all(&WASM_BINARY_VERSION)?;
+    debug_count_stack: bool,
+}
 
-    let (funcs, const_table) = codegen(
-        source,
-        types,
-        imports,
-        disasm_f,
-        typeinf_f,
-        debug_type_infer,
-    )?;
+impl<'a> WasmCompiler<'a> {
+    pub fn new(source: &'a str, types: Vec<FuncType>, imports: Vec<FuncImport>) -> Self {
+        Self {
+            source,
+            types,
+            imports,
+            bind_module: false,
+            disasm_f: None,
+            typeinf_f: None,
+            debug_type_infer: false,
+            debug_count_stack: false,
+        }
+    }
 
-    write_bind(bind, bind_module, &funcs)?;
+    pub fn bind_module(mut self, v: bool) -> Self {
+        self.bind_module = v;
+        self
+    }
 
-    write_section(f, WASM_TYPE_SECTION, &types_section(&types)?)?;
+    pub fn disasm_f(mut self, f: &'a mut dyn Write) -> Self {
+        self.disasm_f = Some(f);
+        self
+    }
 
-    write_section(f, WASM_IMPORT_SECTION, &import_section(&imports)?)?;
+    pub fn typeinf_f(mut self, f: &'a mut dyn Write) -> Self {
+        self.typeinf_f = Some(f);
+        self
+    }
 
-    write_section(f, WASM_FUNCTION_SECTION, &functions_section(&funcs)?)?;
+    pub fn debug_type_infer(mut self, v: bool) -> Self {
+        self.debug_type_infer = v;
+        self
+    }
 
-    write_section(f, WASM_MEMORY_SECTION, &memory_section()?)?;
+    pub fn debug_count_stack(mut self, v: bool) -> Self {
+        self.debug_count_stack = v;
+        self
+    }
 
-    write_section(f, WASM_EXPORT_SECTION, &export_section(&funcs, &imports)?)?;
+    /// `bind_module` indicates whether to use ES6 module for binding JS code.
+    pub fn compile_wasm(&mut self, f: &mut impl Write, bind: &mut impl Write) -> CompileResult<()> {
+        f.write_all(b"\0asm")?;
+        f.write_all(&WASM_BINARY_VERSION)?;
 
-    write_section(f, WASM_CODE_SECTION, &code_section(&funcs, &types)?)?;
+        let (funcs, const_table) = self.codegen()?;
 
-    write_section(f, WASM_DATA_SECTION, &data_section(&const_table)?)?;
+        write_bind(bind, self.bind_module, &funcs)?;
 
-    Ok(())
+        write_section(f, WASM_TYPE_SECTION, &types_section(&self.types)?)?;
+
+        write_section(f, WASM_IMPORT_SECTION, &import_section(&self.imports)?)?;
+
+        write_section(f, WASM_FUNCTION_SECTION, &functions_section(&funcs)?)?;
+
+        write_section(f, WASM_MEMORY_SECTION, &memory_section()?)?;
+
+        write_section(
+            f,
+            WASM_EXPORT_SECTION,
+            &export_section(&funcs, &self.imports)?,
+        )?;
+
+        write_section(f, WASM_CODE_SECTION, &code_section(&funcs, &self.types)?)?;
+
+        write_section(f, WASM_DATA_SECTION, &data_section(&const_table)?)?;
+
+        Ok(())
+    }
 }
 
 /// Write a JS binding code, similar to wasm-bindgen does for Rust.
@@ -173,10 +211,12 @@ fn write_bind(f: &mut impl Write, module: bool, funcs: &[FuncDef]) -> std::io::R
 pub fn disasm_wasm(
     f: &mut impl Write,
     source: &str,
-    types: &mut Vec<FuncType>,
-    imports: &[FuncImport],
+    types: Vec<FuncType>,
+    imports: Vec<FuncImport>,
 ) -> CompileResult<()> {
-    let (_, const_table) = codegen(source, types, imports, Some(f), None, false)?;
+    let mut wasm_compiler = WasmCompiler::new(source, types, imports);
+    wasm_compiler.disasm_f = Some(f);
+    let (_, const_table) = wasm_compiler.codegen()?;
 
     writeln!(
         f,
@@ -192,149 +232,164 @@ pub fn disasm_wasm(
 pub fn typeinf_wasm(
     f: &mut impl Write,
     source: &str,
-    types: &mut Vec<FuncType>,
-    imports: &[FuncImport],
+    types: Vec<FuncType>,
+    imports: Vec<FuncImport>,
 ) -> CompileResult<()> {
-    let _ = codegen(source, types, imports, None, Some(f), false)?;
+    let mut wasm_compiler = WasmCompiler::new(source, types, imports);
+    wasm_compiler.typeinf_f = Some(f);
+    let _ = wasm_compiler.codegen()?;
     Ok(())
 }
 
-fn codegen(
-    source: &str,
-    types: &mut Vec<FuncType>,
-    imports: &[FuncImport],
-    mut disasm_f: Option<&mut dyn Write>,
-    typeinf_f: Option<&mut dyn Write>,
-    debug_type_infer: bool,
-) -> CompileResult<(Vec<FuncDef>, ConstTable)> {
-    let mut const_table = ConstTable::new();
-    let mut funcs = vec![];
+impl<'a> WasmCompiler<'a> {
+    fn codegen(&mut self) -> CompileResult<(Vec<FuncDef>, ConstTable)> {
+        let mut const_table = ConstTable::new();
+        let mut funcs = vec![];
 
-    compile_std_lib(types, imports, &mut const_table, &mut funcs, &mut disasm_f)?;
-
-    let std_fns = funcs.len();
-
-    println!("functions before type infer:");
-    for func in &funcs {
-        println!("  {}", func.name);
-    }
-
-    let mut stmts = parse(&source).map_err(|e| CompileError::Compile(e))?;
-
-    let structs = get_structs(&stmts)?;
-
-    set_infer_debug(debug_type_infer);
-
-    run_type_infer(&mut stmts, types, imports, &funcs, &structs, typeinf_f)?;
-
-    fn find_funcs<'a>(stmts: &'a [Statement<'a>], funcs: &mut Vec<&FnDecl<'a>>) {
-        for stmt in stmts.iter() {
-            if let Statement::FnDecl(fn_decl) = stmt {
-                funcs.push(fn_decl);
-                find_funcs(&fn_decl.stmts, funcs);
-            }
-            if let Statement::Brace(stmts) = stmt {
-                find_funcs(stmts, funcs);
-            }
-        }
-    }
-
-    let mut func_stmts = vec![];
-
-    find_funcs(&stmts, &mut func_stmts);
-
-    println!("func_stmts: {}", func_stmts.len());
-
-    for func_stmt in &func_stmts {
-        let ty = types.len();
-        let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
-            CompileError::Compile(format!(
-                "Function return type could not be determined: {}",
-                func_stmt.ret_ty
-            ))
-        })?;
-
-        let mut params = func_stmt
-            .params
-            .iter()
-            .map(|param| param.ty.determine())
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| {
-                CompileError::Compile("Function argument type could not be determined".to_string())
-            })?;
-
-        // If return type is non-primitive, push a return pointer
-        if matches!(ret_ty, Type::Struct(_)) {
-            println!("Func statement {} returning struct", func_stmt.name);
-            params.push(Type::I32);
-        }
-
-        types.push(FuncType {
-            params,
-            results: if !matches!(ret_ty, Type::Void | Type::Struct(_)) {
-                vec![ret_ty.clone()]
-            } else {
-                vec![]
-            },
-        });
-
-        let func = FuncDef {
-            name: func_stmt.name.to_string(),
-            ty,
-            args: 0,
-            ret_ty,
-            code: vec![],
-            locals: vec![],
-            public: func_stmt.public,
-        };
-
-        funcs.push(func);
-    }
-
-    for (i, func_stmt) in func_stmts.iter().enumerate() {
-        let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
-            CompileError::Compile("Could not determine return type by type inference".to_string())
-        })?;
-        let args = func_stmt
-            .params
-            .iter()
-            .map(|param| param.clone())
-            .collect::<Vec<_>>();
-        let mut compiler = Compiler::new(
-            args.clone(),
-            ret_ty.clone(),
-            types,
-            &imports,
+        compile_std_lib(
+            &mut self.types,
+            &mut self.imports,
             &mut const_table,
             &mut funcs,
+            &mut self.disasm_f,
+        )?;
+
+        let std_fns = funcs.len();
+
+        println!("functions before type infer:");
+        for func in &funcs {
+            println!("  {}", func.name);
+        }
+
+        let mut stmts = parse(self.source).map_err(|e| CompileError::Compile(e))?;
+
+        let structs = get_structs(&stmts)?;
+
+        set_infer_debug(self.debug_type_infer);
+
+        run_type_infer(
+            &mut stmts,
+            &mut self.types,
+            &mut self.imports,
+            &funcs,
             &structs,
-        )
-        .map_err(CompileError::Compile)?;
-        if let Err(e) = compiler.compile(&func_stmt.stmts, ret_ty) {
-            return Err(CompileError::Compile(format!(
-                "Error in compiling function {}: {e}",
-                func_stmt.name
-            )));
+            self.typeinf_f.take(),
+        )?;
+
+        fn find_funcs<'a>(stmts: &'a [Statement<'a>], funcs: &mut Vec<&FnDecl<'a>>) {
+            for stmt in stmts.iter() {
+                if let Statement::FnDecl(fn_decl) = stmt {
+                    funcs.push(fn_decl);
+                    find_funcs(&fn_decl.stmts, funcs);
+                }
+                if let Statement::Brace(stmts) = stmt {
+                    find_funcs(stmts, funcs);
+                }
+            }
         }
 
-        let code = compiler.get_code().to_vec();
-        let locals = compiler.get_locals().to_vec();
+        let mut func_stmts = vec![];
 
-        let func = &mut funcs[i + std_fns];
-        func.args = args.len();
-        func.code = code;
-        func.locals = locals;
+        find_funcs(&stmts, &mut func_stmts);
 
-        if let Some(ref mut disasm_f) = disasm_f {
-            let func_ty = &types[func.ty];
+        println!("func_stmts: {}", func_stmts.len());
 
-            disasm_func(&func, &func_ty, disasm_f)?;
+        for func_stmt in &func_stmts {
+            let ty = self.types.len();
+            let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
+                CompileError::Compile(format!(
+                    "Function return type could not be determined: {}",
+                    func_stmt.ret_ty
+                ))
+            })?;
+
+            let mut params = func_stmt
+                .params
+                .iter()
+                .map(|param| param.ty.determine())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    CompileError::Compile(
+                        "Function argument type could not be determined".to_string(),
+                    )
+                })?;
+
+            // If return type is non-primitive, push a return pointer
+            if matches!(ret_ty, Type::Struct(_)) {
+                println!("Func statement {} returning struct", func_stmt.name);
+                params.push(Type::I32);
+            }
+
+            self.types.push(FuncType {
+                params,
+                results: if !matches!(ret_ty, Type::Void | Type::Struct(_)) {
+                    vec![ret_ty.clone()]
+                } else {
+                    vec![]
+                },
+            });
+
+            let func = FuncDef {
+                name: func_stmt.name.to_string(),
+                ty,
+                args: 0,
+                ret_ty,
+                code: vec![],
+                locals: vec![],
+                public: func_stmt.public,
+            };
+
+            funcs.push(func);
         }
+
+        for (i, func_stmt) in func_stmts.iter().enumerate() {
+            let ret_ty = func_stmt.ret_ty.determine().ok_or_else(|| {
+                CompileError::Compile(
+                    "Could not determine return type by type inference".to_string(),
+                )
+            })?;
+            let args = func_stmt
+                .params
+                .iter()
+                .map(|param| param.clone())
+                .collect::<Vec<_>>();
+            let mut compiler = Compiler::new(
+                args.clone(),
+                ret_ty.clone(),
+                &mut self.types,
+                &self.imports,
+                &mut const_table,
+                &mut funcs,
+                &structs,
+            )
+            .map_err(CompileError::Compile)?;
+            compiler.debug_count_stack(self.debug_count_stack);
+            if let Err(e) = compiler.compile(&func_stmt.stmts, ret_ty) {
+                return Err(CompileError::Compile(format!(
+                    "Error in compiling function {}: {e}",
+                    func_stmt.name
+                )));
+            }
+
+            let code = compiler.get_code().to_vec();
+            let locals = compiler.get_locals().to_vec();
+
+            let func = &mut funcs[i + std_fns];
+            func.args = args.len();
+            func.code = code;
+            func.locals = locals;
+
+            if let Some(ref mut disasm_f) = self.disasm_f {
+                let func_ty = &self.types[func.ty];
+
+                disasm_func(&func, &func_ty, disasm_f)?;
+            }
+        }
+
+        const_table.finish();
+
+        Ok((funcs, const_table))
     }
-
-    const_table.finish();
-
-    Ok((funcs, const_table))
 }
 
 fn get_structs<'src>(stmts: &[Statement<'src>]) -> CompileResult<HashMap<String, StructDef>> {

@@ -8,6 +8,27 @@ use crate::{
 
 use super::Compiler;
 
+macro_rules! dprintln {
+    ($fmt:literal) => {
+        if DEBUG.get() {
+            println!($fmt);
+        }
+    };
+    ($fmt:literal, $($args:expr),*) => {
+        if DEBUG.get() {
+            println!($fmt, $($args),*);
+        }
+    };
+}
+
+thread_local! {
+    static DEBUG: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
+pub(super) fn set_debug_count_stack(b: bool) {
+    DEBUG.set(b);
+}
+
 impl<'a> Compiler<'a> {
     fn count_stack_expr(&mut self, ast: &Expression) -> Result<usize, String> {
         use Expression::*;
@@ -20,12 +41,12 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Struct {stname} not found"));
                 };
 
-                println!("Struct literal {stname} size {}", stdef.size);
+                dprintln!("Struct literal {stname} size {}", stdef.size);
 
                 let mut stack_size = stdef.size;
                 for (fname, field) in fields {
                     let field_sz = self.count_stack_expr(field)?;
-                    println!("Struct field {fname} size {field_sz}");
+                    dprintln!("Struct field {fname} size {field_sz}");
                     stack_size += field_sz;
                 }
                 stack_size
@@ -42,14 +63,14 @@ impl<'a> Compiler<'a> {
                     .find_func(fname)
                     .ok_or_else(|| format!("Calling undefined function {fname}"))?;
 
-                println!("count_stack: Calling function {}", fname);
+                dprintln!("count_stack: Calling function {}", fname);
 
                 if let Some(stname) = ret_ty.struct_name() {
                     let st = self
                         .structs
                         .get(stname)
                         .ok_or_else(|| format!("Struct {stname} not found"))?;
-                    println!("Adding struct {stname} size {}", st.size);
+                    dprintln!("Adding struct {stname} size {}", st.size);
                     stack_size += st.size;
                 }
 
@@ -166,7 +187,7 @@ impl<'a> Compiler<'a> {
                     .find_func(&dunder)
                     .ok_or_else(|| format!("Calling undefined function {}", dunder))?;
 
-                println!(
+                dprintln!(
                     "count_stack: Calling function {} adding stack size {}",
                     dunder,
                     lhs_sz + rhs_sz

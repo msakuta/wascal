@@ -9,5 +9,5 @@ mod wasm_file;
 pub use crate::{
     model::{FuncImport, FuncType, Type},
     parser::{format_expr, format_stmt, parse},
-    wasm_file::{compile_wasm, default_imports, default_types, disasm_wasm, typeinf_wasm},
+    wasm_file::{default_imports, default_types, disasm_wasm, typeinf_wasm, WasmCompiler},
 };

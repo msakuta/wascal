@@ -10,6 +10,8 @@ mod strcat;
 
 use std::{collections::HashMap, io::Write};
 
+use count_stack::set_debug_count_stack;
+
 use self::emit::{to_load, to_store};
 
 use crate::{
@@ -256,6 +258,7 @@ pub struct Compiler<'a> {
     base_offset: usize,
     /// The size of the linear memory stack, in bytes, not to be confused with the locals
     stack_size: usize,
+    debug_count_stack: bool,
 }
 
 impl<'a> Compiler<'a> {
@@ -295,13 +298,21 @@ impl<'a> Compiler<'a> {
             base_ptr: 0,
             base_offset: 0,
             stack_size: 0,
+            debug_count_stack: false,
         })
     }
 
+    pub fn debug_count_stack(&mut self, v: bool) {
+        self.debug_count_stack = v;
+    }
+
     pub fn compile(&mut self, ast: &[Statement], ty: Type) -> Result<Type, String> {
+        set_debug_count_stack(self.debug_count_stack);
         self.stack_size = self.count_stack_stmts(ast)?;
 
-        println!("stack size is {}", self.stack_size);
+        if self.debug_count_stack {
+            println!("stack size is {}", self.stack_size);
+        }
 
         if 0 < self.stack_size {
             // Remember base pointer, the address of the top of the stack before calling this function.
