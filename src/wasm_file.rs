@@ -1,7 +1,7 @@
 //! Code to write wasm file format sections.
 use crate::{
     compiler::{disasm_func, Compiler, OpCode},
-    const_table::ConstTable,
+    const_table::{ConstTable, INITIAL_PAGES},
     infer::{run_type_infer, set_infer_debug},
     leb128::encode_leb128,
     model::{FuncDef, FuncImport, FuncType, StructDef},
@@ -577,7 +577,6 @@ fn export_section(funcs: &[FuncDef], imports: &[FuncImport]) -> std::io::Result<
 
 fn memory_section() -> std::io::Result<Vec<u8>> {
     const NO_LIMIT: u8 = 0u8;
-    const INITIAL_PAGES: u32 = 1;
 
     let mut buf = vec![];
     encode_leb128(&mut buf, 1)?;

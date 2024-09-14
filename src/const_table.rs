@@ -9,8 +9,10 @@ pub(crate) struct ConstTable {
 }
 
 const PTR_SIZE: usize = std::mem::size_of::<i32>();
-// Use half of the first page for the stack. Probably not enough for general purpose.
-const STACK_SIZE: usize = 1024 * 32;
+// We should allocate enough pages to contain the stack.
+pub(crate) const INITIAL_PAGES: u32 = 16;
+// Use one minus total pages for the stack.
+const STACK_SIZE: usize = 1024 * 64 * (INITIAL_PAGES as usize - 1);
 
 impl ConstTable {
     pub fn new() -> Self {
