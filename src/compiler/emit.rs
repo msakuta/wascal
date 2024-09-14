@@ -16,18 +16,19 @@ impl<'a> Compiler<'a> {
         encode_sleb128(&mut self.code, val as i32).unwrap();
     }
 
-    pub(super) fn i32load(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Load as u8);
+    pub(super) fn load(&mut self, op: OpCode, offset: u32) -> Result<(), String> {
+        self.code.push(op as u8);
         encode_leb128(&mut self.code, 0).unwrap();
         encode_leb128(&mut self.code, offset).unwrap();
         Ok(())
     }
 
+    pub(super) fn i32load(&mut self, offset: u32) -> Result<(), String> {
+        self.load(OpCode::I32Load, offset)
+    }
+
     pub(super) fn i32load8_s(&mut self, offset: u32) -> Result<(), String> {
-        self.code.push(OpCode::I32Load8S as u8);
-        encode_leb128(&mut self.code, 0).unwrap();
-        encode_leb128(&mut self.code, offset).unwrap();
-        Ok(())
+        self.load(OpCode::I32Load8S, offset)
     }
 
     pub(super) fn store(&mut self, op: OpCode, offset: u32) -> Result<(), String> {
@@ -69,4 +70,26 @@ impl<'a> Compiler<'a> {
         encode_leb128(&mut self.code, field.offset as u32).unwrap();
         Ok(field.ty.clone())
     }
+}
+
+pub(super) fn to_load(ty: &Type) -> Option<OpCode> {
+    Some(match ty {
+        Type::I32 => OpCode::I32Load,
+        Type::I64 => OpCode::I64Load,
+        Type::F32 => OpCode::F32Load,
+        Type::F64 => OpCode::F64Load,
+        Type::Void => return None,
+        Type::Str | Type::Struct(_) => OpCode::I32Load,
+    })
+}
+
+pub(super) fn to_store(ty: &Type) -> Option<OpCode> {
+    Some(match ty {
+        Type::I32 => OpCode::I32Store,
+        Type::I64 => OpCode::I64Store,
+        Type::F32 => OpCode::F32Store,
+        Type::F64 => OpCode::F64Store,
+        Type::Void => return None,
+        Type::Str | Type::Struct(_) => OpCode::I32Store,
+    })
 }

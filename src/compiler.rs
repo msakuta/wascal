@@ -1,3 +1,5 @@
+mod alloca;
+mod count_stack;
 mod disasm;
 mod emit;
 mod malloc;
@@ -7,6 +9,10 @@ mod sqrt;
 mod strcat;
 
 use std::{collections::HashMap, io::Write};
+
+use count_stack::set_debug_count_stack;
+
+use self::emit::{to_load, to_store};
 
 use crate::{
     const_table::ConstTable,
@@ -236,6 +242,7 @@ enum LValue {
 /// so you need multiple instances of this object.
 pub struct Compiler<'a> {
     code: Vec<u8>,
+    args: usize,
     locals: Vec<VarDecl>,
     ret_ty: Type,
     types: &'a mut Vec<FuncType>,
@@ -244,6 +251,14 @@ pub struct Compiler<'a> {
     /// References to other functions to call and type check.
     funcs: &'a mut Vec<FuncDef>,
     structs: &'a HashMap<String, StructDef>,
+    local_ty: HashMap<String, Type>,
+    /// A local index indicating the base pointer, the address of the bottom of the linear memory stack.
+    base_ptr: usize,
+    /// An accumulator to keep track of how many bytes are used in the stack in emit_*
+    base_offset: usize,
+    /// The size of the linear memory stack, in bytes, not to be confused with the locals
+    stack_size: usize,
+    debug_count_stack: bool,
 }
 
 impl<'a> Compiler<'a> {
@@ -255,10 +270,23 @@ impl<'a> Compiler<'a> {
         const_table: &'a mut ConstTable,
         funcs: &'a mut Vec<FuncDef>,
         structs: &'a HashMap<String, StructDef>,
-    ) -> Self {
-        let locals = args;
-        Self {
+    ) -> Result<Self, String> {
+        let local_ty = args
+            .iter()
+            .map(|arg| Some((arg.name.clone(), arg.ty.clone().determine()?)))
+            .collect::<Option<_>>()
+            .ok_or_else(|| format!("Argument type could not be determined"))?;
+        let mut locals = args;
+        let args = locals.len();
+        if matches!(ret_ty, Type::Struct(_)) {
+            locals.push(VarDecl {
+                name: "return".to_string(),
+                ty: ret_ty.clone().into(),
+            });
+        }
+        Ok(Self {
             code: vec![],
+            args,
             locals,
             ret_ty,
             types,
@@ -266,29 +294,80 @@ impl<'a> Compiler<'a> {
             const_table,
             funcs,
             structs,
-        }
+            local_ty,
+            base_ptr: 0,
+            base_offset: 0,
+            stack_size: 0,
+            debug_count_stack: false,
+        })
+    }
+
+    pub fn debug_count_stack(&mut self, v: bool) {
+        self.debug_count_stack = v;
     }
 
     pub fn compile(&mut self, ast: &[Statement], ty: Type) -> Result<Type, String> {
-        // self.i32const(0);
-        // self.code.push(OpCode::I32Const as u8);
-        // encode_leb128(&mut self.code, 0).unwrap();
-        // self.i32load()?;
-        // self.code.push(OpCode::I32Const as u8);
-        // encode_leb128(&mut self.code, 1).unwrap();
-        // self.code.push(OpCode::I32Add as u8);
-        // self.i32store()?;
+        set_debug_count_stack(self.debug_count_stack);
+        self.stack_size = self.count_stack_stmts(ast)?;
 
-        // self.code.push(OpCode::LocalGet as u8);
-        // encode_leb128(&mut self.code, 0).unwrap();
+        if self.debug_count_stack {
+            println!("stack size is {}", self.stack_size);
+        }
+
+        if 0 < self.stack_size {
+            // Remember base pointer, the address of the top of the stack before calling this function.
+            // It forms a stack in linear memory. Not to be confused with operand stack in Wasm runtime.
+            self.i32const(4);
+            self.i32load(0)?;
+            self.base_ptr = self.add_local("", Type::I32);
+            self.i32const(self.stack_size as u32);
+            self.call_func("alloca")?;
+            self.code.push(OpCode::Drop as u8);
+        }
 
         let last = self.emit_stmts(ast, &ty)?;
+
+        self.return_code()?;
 
         self.code.push(OpCode::End as u8);
         Ok(last)
     }
 
-    fn find_func(&self, name: &str) -> Result<(usize, Type), String> {
+    fn return_code(&mut self) -> Result<(), String> {
+        // The calling convention for non-primitive type is that
+        //   <arg0> <arg1> ... <arg n-1> <return_addr>
+        // where return_addr points to the calling function's stack address that
+        // holds the result.
+        // TODO: RVO
+        if let Some(stname) = self.ret_ty.struct_name() {
+            let st = self
+                .structs
+                .get(stname)
+                .ok_or_else(|| format!("Struct {stname} not found"))?;
+            let local_buf = self.add_local("", Type::I32);
+            let ret_buf = self.args;
+            for field in &st.fields {
+                if let Some((store_op, load_op)) = to_store(&field.ty).zip(to_load(&field.ty)) {
+                    self.local_get(ret_buf);
+                    self.local_get(local_buf);
+                    self.load(load_op, field.offset as u32)?;
+                    self.store(store_op, field.offset as u32)?;
+                }
+            }
+        }
+
+        if 0 < self.stack_size {
+            // Restore base pointer
+            self.i32const(4);
+            self.local_get(self.base_ptr);
+            self.i32store(0)?;
+        }
+
+        Ok(())
+    }
+
+    /// Find a function defined in this Wasm module, i.e. not an imported function.
+    fn find_local_func(&self, name: &str) -> Result<(usize, Type), String> {
         let (idx, ret) = self
             .funcs
             .iter()
@@ -307,7 +386,7 @@ impl<'a> Compiler<'a> {
 
     /// Find and call a function with a name
     fn call_func(&mut self, name: &str) -> Result<Type, String> {
-        let (func_id, ret_ty) = self.find_func(name)?;
+        let (func_id, ret_ty) = self.find_local_func(name)?;
         self.code.push(OpCode::Call as u8);
         encode_leb128(&mut self.code, func_id as u32).map_err(|e| e.to_string())?;
         Ok(ret_ty)
@@ -373,45 +452,43 @@ impl<'a> Compiler<'a> {
                     return Err(format!("Struct {stname} not found"));
                 };
 
-                let Some((i_malloc, _)) = self
-                    .funcs
-                    .iter()
-                    .enumerate()
-                    .find(|(_, fn_def)| fn_def.name == "malloc")
-                else {
-                    return Err("malloc not found".to_string());
-                };
+                // We need to collect to a vec because self.base_ptr can change
+                let fields = fields
+                    .into_iter()
+                    .map(|(fname, field)| {
+                        self.local_get(self.base_ptr);
+                        let ex = self.emit_expr(field)?;
+                        let stfield = stdef
+                            .fields
+                            .iter()
+                            .find(|field| &field.name == fname)
+                            .ok_or_else(|| format!("Struct field {fname} not found"))?;
+                        let op = match ex {
+                            Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Store,
+                            Type::I64 => OpCode::I64Store,
+                            Type::F32 => OpCode::F32Store,
+                            Type::F64 => OpCode::F64Store,
+                            Type::Void => {
+                                return Err(format!(
+                                    "Struct field {} has a void type",
+                                    stfield.name
+                                ))
+                            }
+                        };
+                        Ok((op, stfield))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                let idx_malloc = self.imports.len() + i_malloc;
-
-                self.i32const(stdef.size as u32);
-
-                self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, idx_malloc as u32).unwrap();
-
-                let ptr = self.add_local("", Type::Struct(stname.to_string()));
-
-                for (fname, field) in fields {
-                    self.local_get(ptr);
-                    let ex = self.emit_expr(field)?;
-                    let Some(stfield) = stdef.fields.iter().find(|field| &field.name == fname)
-                    else {
-                        return Err(format!("Struct field {fname} not found"));
-                    };
-                    self.code.push(match ex {
-                        Type::I32 | Type::Str | Type::Struct(_) => OpCode::I32Store,
-                        Type::I64 => OpCode::I64Store,
-                        Type::F32 => OpCode::F32Store,
-                        Type::F64 => OpCode::F64Store,
-                        Type::Void => {
-                            return Err(format!("Struct field {} has a void type", stfield.name))
-                        }
-                    } as u8);
-                    encode_leb128(&mut self.code, 0).unwrap();
-                    encode_leb128(&mut self.code, stfield.offset as u32).unwrap();
+                // reverse because values are pushed to stack
+                for (op, stfield) in fields.into_iter().rev() {
+                    self.store(op, (self.base_offset + stfield.offset) as u32)?;
                 }
 
-                self.local_get(ptr);
+                self.local_get(self.base_ptr);
+                self.i32const(self.base_offset as u32);
+                self.code.push(OpCode::I32Add as u8);
+
+                self.base_offset += stdef.size;
 
                 Ok(Type::Struct(stname.to_string()))
             }
@@ -427,36 +504,17 @@ impl<'a> Compiler<'a> {
                 Ok(ty)
             }
             Expression::FnInvoke(name, args) => {
-                let idx;
-                let ret_ty;
-                if let Some((i, import)) = self
-                    .imports
-                    .iter()
-                    .enumerate()
-                    .find(|(_, f)| f.name == *name)
-                {
-                    idx = i;
-                    ret_ty = self.types[import.ty]
-                        .results
-                        .get(0)
-                        .cloned()
-                        .unwrap_or(Type::Void);
-                } else if let Some((i, func)) =
-                    self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
-                {
-                    idx = i + self.imports.len();
-                    ret_ty = func.ret_ty.clone();
-                } else {
-                    return Err(format!("Calling undefined function {}", name));
-                };
                 for arg in args {
                     if Type::Void == self.emit_expr(arg)? {
                         return Err("Function argument requires a value".to_string());
                     }
                 }
-                self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, idx as u32).unwrap();
-                Ok(ret_ty)
+
+                let (func_idx, ret_ty, _) = self
+                    .find_func(name)
+                    .ok_or_else(|| format!("Calling undefined function {name}"))?;
+
+                self.emit_call_func(func_idx, ret_ty)
             }
             Expression::Cast(ex, ty) => {
                 let ex_ty = self.emit_expr(ex)?;
@@ -724,24 +782,21 @@ impl<'a> Compiler<'a> {
             }
             (Type::Struct(_), Type::Struct(_)) => {
                 let dunder = format!("__{name}__");
-                let (func_idx, func) = self
-                    .funcs
-                    .iter()
-                    .enumerate()
-                    .find(|(_, func)| func.name == dunder)
-                    .ok_or_else(|| format!("{dunder} was not found"))?;
-                if func.locals.get(0).map(|lo| &lo.ty) != Some(&lhs.clone().into()) {
-                    return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                let (func_idx, ret_ty, func) = self
+                    .find_func(&dunder)
+                    .ok_or_else(|| format!("Calling undefined function {}", dunder))?;
+                if let Some(func) = func {
+                    if func.locals.get(0).map(|lo| &lo.ty) != Some(&lhs.clone().into()) {
+                        return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                    }
+                    if func.locals.get(1).map(|lo| &lo.ty) != Some(&rhs.clone().into()) {
+                        return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
+                    }
                 }
-                if func.locals.get(1).map(|lo| &lo.ty) != Some(&rhs.clone().into()) {
-                    return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}"));
-                }
-                let func_id = self.imports.len() + func_idx;
 
-                self.code.push(OpCode::Call as u8);
-                encode_leb128(&mut self.code, func_id as u32).map_err(|e| e.to_string())?;
+                let ret_ty = self.emit_call_func(func_idx, ret_ty)?;
 
-                return Ok(func.ret_ty.clone());
+                return Ok(ret_ty);
             }
             _ => return Err(format!("Type mismatch for {name:?}: {lhs} and {rhs}")),
         };
@@ -777,6 +832,67 @@ impl<'a> Compiler<'a> {
         };
         self.code.push(op as u8);
         Ok(Type::I32)
+    }
+
+    /// Find a function by name, either user defined or imported, and return its index, return type
+    /// and optionally a reference to FuncDef, if it is user defined function.
+    fn find_func(&self, name: &str) -> Option<(usize, Type, Option<&FuncDef>)> {
+        let idx;
+        let ret_ty;
+        let func_def;
+        if let Some((i, import)) = self
+            .imports
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == *name)
+        {
+            idx = i;
+            ret_ty = self.types[import.ty]
+                .results
+                .get(0)
+                .cloned()
+                .unwrap_or(Type::Void);
+            func_def = None;
+        } else if let Some((i, func)) = self.funcs.iter().enumerate().find(|(_, f)| f.name == *name)
+        {
+            idx = i + self.imports.len();
+            ret_ty = func.ret_ty.clone();
+            func_def = Some(func);
+        } else {
+            return None;
+        };
+        Some((idx, ret_ty, func_def))
+    }
+
+    fn emit_call_func(&mut self, func_idx: usize, ret_ty: Type) -> Result<Type, String> {
+        // If the returned value is a struct, allocate memory on the calling function
+        let ret_local = if let Some(stname) = ret_ty.struct_name() {
+            let st = self
+                .structs
+                .get(stname)
+                .ok_or_else(|| format!("Struct {stname} is not found"))?;
+            println!("Calling function returning a struct {stname}");
+            self.local_get(self.base_ptr);
+            self.i32const(self.base_offset as u32);
+            self.code.push(OpCode::I32Add as u8);
+            let local = self.add_local("", ret_ty.clone());
+            self.local_get(local);
+
+            self.base_offset += st.size;
+
+            Some(local)
+        } else {
+            None
+        };
+
+        self.code.push(OpCode::Call as u8);
+        encode_leb128(&mut self.code, func_idx as u32).unwrap();
+
+        if let Some(ret_local) = ret_local {
+            self.local_get(ret_local);
+        }
+
+        Ok(ret_ty)
     }
 
     /// Returns if a value is pushed to the stack

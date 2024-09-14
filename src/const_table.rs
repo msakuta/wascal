@@ -9,10 +9,17 @@ pub(crate) struct ConstTable {
 }
 
 const PTR_SIZE: usize = std::mem::size_of::<i32>();
+// We should allocate enough pages to contain the stack.
+pub(crate) const INITIAL_PAGES: u32 = 16;
+// Use one minus total pages for the stack.
+const STACK_SIZE: usize = 1024 * 64 * (INITIAL_PAGES as usize - 1);
 
 impl ConstTable {
     pub fn new() -> Self {
         let mut buf = vec![];
+        // The first word is the starting address of the bump allocator.
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        // The second word is the stack pointer
         buf.extend_from_slice(&0u32.to_le_bytes());
         Self {
             base_addr: 0,
@@ -57,8 +64,10 @@ impl ConstTable {
             self.buf
                 .resize((self.buf.len() + PTR_SIZE - 1) / PTR_SIZE * PTR_SIZE, 0u8);
         }
+        let bytes = ((self.buf.len() + STACK_SIZE) as u32).to_le_bytes();
+        self.buf[..PTR_SIZE].copy_from_slice(&bytes); // heap pointer
         let bytes = (self.buf.len() as u32).to_le_bytes();
-        self.buf[..PTR_SIZE].copy_from_slice(&bytes);
+        self.buf[PTR_SIZE..PTR_SIZE * 2].copy_from_slice(&bytes); // stack pointer
     }
 
     pub fn print_data(&self, f: &mut impl Write) -> std::io::Result<()> {

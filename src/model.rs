@@ -49,6 +49,13 @@ impl Type {
             Self::Void => 0,
         }
     }
+
+    pub(crate) fn struct_name(&self) -> Option<&String> {
+        match self {
+            Self::Struct(stname) => Some(stname),
+            _ => None,
+        }
+    }
 }
 
 impl From<u8> for Type {

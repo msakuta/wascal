@@ -4,7 +4,7 @@ use std::{collections::HashMap, io::Write};
 
 use crate::{
     model::{FuncDef, StructDef, TypeSet},
-    parser::{format_expr, format_stmt, Expression, Statement},
+    parser::{format_stmt, Expression, Statement},
     wasm_file::{CompileError, CompileResult},
     FuncImport, FuncType, Type,
 };

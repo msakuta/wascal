@@ -37,7 +37,7 @@ impl<'a> Compiler<'a> {
             const_table,
             funcs,
             &structs,
-        );
+        )?;
         compiler.codegen_strcat()?;
         compiler.code.push(OpCode::End as u8);
 
