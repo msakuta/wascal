@@ -92,7 +92,9 @@ document.getElementById("compile").addEventListener("click", () => runCommon(asy
         const [wasm, bindStr] = compile(source);
         bind = eval(bindStr);
         opts.output.print = s => outputBuf += bind.returnString(s) + "\n";
-        bind.init(wasm, opts);
+        bind.init(wasm, opts).catch(e => {
+            consoleElem.value = `Compile failed: ${e}`;
+        });
         consoleElem.value = `Compiled WebAssembly module in ${wasm.length} bytes.`;
     }
     catch(e) {
