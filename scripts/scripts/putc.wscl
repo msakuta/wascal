@@ -1,0 +1,4 @@
+pub let main(x: i32) = {
+    putc(x);
+    x
+}

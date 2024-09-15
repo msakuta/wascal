@@ -1,0 +1,43 @@
+let printdensity(d: i32) -> i32 = {
+  if d > 127 {
+    putc(32)
+  } else if d > 8 {
+    putc(46)
+  } else if d > 4 {
+    putc(43)
+  } else {
+    putc(42)
+  }
+}
+
+let mandelconverge(creal: f64, cimag: f64) -> i32 = {
+    let r: f64 = creal;
+    let i: f64 = cimag;
+    for iter in 0 to 255 {
+        if r*r + i*i > 4. {
+            return iter;
+        };
+        let next_r: f64 = r * r - i * i + creal;
+        i = 2. * r * i + cimag;
+        r = next_r;
+    }
+    iter
+}
+
+let mandel(xmin: f64, ymin: f64, xstep: f64, ystep: f64, xsteps: f64, ysteps: f64) -> i32 = {
+    let xmax: f64 = xmin + xstep * xsteps;
+    let ymax: f64 = ymin + ystep * ysteps;
+    let ixsteps: i32 = xsteps as i32;
+    let iysteps: i32 = ysteps as i32;
+    for iy in 0 to iysteps {
+        let y: f64 = iy as f64 * (ymax - ymin) * ystep + ymin;
+        for ix in 0 to ixsteps {
+            let x: f64 = ix as f64 * (xmax - xmin) * xstep + xmin;
+            printdensity(mandelconverge(x,y));
+        }
+        putc(10);
+    }
+    0
+}
+
+pub let main() = mandel(-2.3, -2.0, 0.025 / 2., 0.05 / 2., 156., 80.);

@@ -1,0 +1,1 @@
+pub let hello(x: f64) = format_f64(x)

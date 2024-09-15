@@ -1,0 +1,78 @@
+<!doctype html><html lang="en"><head><title>Wascal on Wasm</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{color:#000;text-align:center;background-color:#f0f0f0;margin:0;width:100%}.code{font-family:Monospace;font-size:15px}.justify{text-align:justify;padding:2em}.leftAlign{text-align:left;padding:1em}.border{border:solid #000 2px;margin:.5em 1em .5em 1em;padding:.5em}</style></head><body><h1>Wascal on Wasm</h1><hr><div>Samples: <span id="samples"></span></div><div class="border"><h3>Code</h3><div id="highlighting" class="leftAlign"></div></div><div><button id="parseAst">Parse and type infer AST</button> <button id="disasm">Disassemble</button> <button id="compile">Compile</button></div><div id="timeMessage"></div><div class="border"><h3>Function List</h3><div id="functions" class="leftAlign"></div></div><div class="code border"><h3>Output</h3><textarea id="console" type="text" readonly="readonly" cols="120" rows="20"></textarea></div><h2>Canvas:</h2><div><button id="clearCanvas">Clear</button></div><canvas id="canvas" width="320" height="320" style="border:solid 1px #000"></canvas><div class="justify"><h2>Data types</h2>WebAssembly has only 4 primitive types, but we have a custom type for strings. You can declare variables and function arguments in a syntax like <tt>a: type</tt> or <tt>let f(a: type) -> type</tt>. <tt>type</tt> can be one of:<ul><li>i32</li><li>i64</li><li>f32</li><li>f64</li><li>str</li></ul><p>String type requires linear memory and a heap memory allocator. We use a bump allocator that constantly leaks memory, so don't use too much memory.</p><h2>Built-in functions</h2><h3>System calls</h3>System calls are exposed from Wasm binary and the runtime directly implements them. They are customized for this web page, but Wascal language itself can run outside the web browser. System calls functionality could be overridden in the embedded environment.<ul><li>print(s: str) - Prints a string to the output console.</li><li>log(value: i32) - Prints a value to JavaScript console (console.log).</li><li>putc(char: i32) - Puts a single character, specified by ascii code, to the output console.</li><li>format_f64(v: f64) -> str - Formats a f64 to a string.</li><li>set_fill_style(r: i32, g: i32, b: i32) - Sets fill color for painting on the canvas.</li><li>rectangle(x: i32, y: i32, width: i32, height: i32) - Draws a filled rectangle on the canvas.</li></ul><h3>Standard library</h3>Standard library is a collection of built-in functions that are commonly used in Wasm runtime. They are used by compiler, not meant to be used by end users.<ul><li>malloc(size: i32) -> i32 - Allocates heap memory block with the given size and return a pointer to it.</li><li>set(ptr: i32, c: i32) - Sets a memory byte at given address. A low level function that end users shouldn't use.</li><li>strcat(lhs: str, rhs: str) -> str - Standard library function that is used to concatenate strings. Uses should use + operator between strings.</li><li>reverse(s: str) -> str - Standard library function that reverses a string.</li><li>sqrt(v: f64) -> f64 - Compute a square root of a value.</li></ul><h2>Syntax</h2>The syntax is inspired a bit by functional languages, although the execution model is imperative.<h3>Literals</h3><p>Digits without a decimal points are abstract integers, which is either i32 or i64. The concrete type will be determined by type inference. Therefore, a integer literal without using will be an error with an ambiguous type.</p><pre>
+42
+            </pre><p>Digits with a decimal points are abstract floats, which is either f32 or f64. The concrete type will be determined by type inference. Therefore, a float literal without using will be an error with an ambiguous type.</p><pre>
+3.14
+</pre><p>String literals are double quoted.</p><pre>
+"Hello"
+</pre><h3>Comments</h3>Wascal has C++-style comments. That is, line comments start with <code>//</code> and block comments are surrounded by <code>/*</code> and <code>*/</code>. Block comments can't nest.<pre>
+// This is a line comment.
+
+/* This is a
+   block comment. */
+</pre><h3>Variable declaration</h3><p>Variables are declared with <tt>let</tt> keyword like below.</p><pre>
+let x: i32 = 42;
+            </pre><p>If the type is omitted, the type is inferred. However, note that the variable has to be constrained by an expression somewhere in the function, otherwise the type inference fails with an ambiguous type. So the function below is ok:</p><pre>
+let f() -> i32 = {
+    let x = 42;
+    x
+}
+            </pre><p>but the one below is not, because its type is not bounded by any expression.</p><pre>
+let f() -> i32 = {
+    let x = 42;
+    0
+}
+            </pre><h3>Function definition</h3><p>Functions are declared with <tt>let</tt> keyword too, but it can have parameters in parentheses.</p><pre>
+let add(x: i32, y: i32) -> i32 = x + y
+            </pre><p>Types of the parameters are required, although this requirement may be lifted in the future. If the return type is omitted, it is inferred from the last expression in the function body.</p><p>You can put <tt>pub</tt> keyword in front of a function definition to denote exported functions from Wasm module. Please note that if you don't put <tt>pub</tt>, it won't be visible from the environment thus not directly callable.</p><pre>
+pub let main() = add(1, 2)
+            </pre><p>Note that if you put a semicolon after a one-linear expression function, it means the value will be dropped, so the function's return type would be void.</p><h3>Brace statement</h3><p>Braces can group multiple statements together. You can use it as the container of a function body made of multiple statements, although you don't have to if your function is entirely made of a single expression. The value of the statement is the last statement in the brace.</p><pre>
+pub let main(x) = {
+    log(x + 42);
+    42
+}
+            </pre><h3>Cast expression</h3>You can cast a type to another with <tt>as</tt> keyword:<pre>
+pub let as_i32(x: f64) -> i32 = x as i32
+            </pre><h3>If expression</h3>Conditional branching is done by <tt>if</tt> expression. Each branch can contain multiple statements and yields the last statement's value like a brace statement.<pre>
+let abs(x) = if x &lt; 0 { -x } else { x }
+            </pre><h3>For statement</h3><tt>for</tt> statement looks like Rust's, but you need to put start and end indices as <tt>start to end</tt>. <tt>start</tt> and <tt>end</tt> indices must be i32. You can put multiple statements in <tt>for</tt> statement, but the last statement is not used, unlike <tt>if</tt> expression.<pre>
+for i in 1 to x {
+    log(i);
+}
+            </pre><p>You can <tt>break</tt> in a statement.</p><pre>
+for i in 1 to x {
+    if 10 &lt; i {
+        break
+    };
+}
+            </pre><h3>Return statement</h3>Return statement lets you exit the function early.<pre>
+let mandelconverge(creal: f64, cimag: f64) -> i32 = {
+    let r: f64 = creal;
+    let i: f64 = cimag;
+    for iter in 0 to 255 {
+        if r*r + i*i > 4. {
+            return iter;
+        };
+        let next_r: f64 = r * r - i * i + creal;
+        i = 2. * r * i + cimag;
+        r = next_r;
+    }
+    iter
+}
+            </pre><h3>Struct declaration statement</h3>Structs are declared with similar syntax to Rust. Note that all structs in Wascal are heap allocated.<pre>
+struct Vec2 {
+    x: f64,
+    y: f64,
+}
+            </pre><h3>Struct field access</h3>With a dot postfix expression, you can access a field of a struct.<pre>
+let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ")"
+            </pre><h3>Dunder methods and Operator Overloading</h3>You can overload certain binary operators with dunder methods, similar to Python.<pre>
+let __add__(lhs: Vec2, rhs: Vec2) = Vec2 {
+    x: lhs.x + rhs.x,
+    y: lhs.y + rhs.y,
+}
+
+let __sub__(lhs: Vec2, rhs: Vec2) = Vec2 {
+    x: lhs.x - rhs.x,
+    y: lhs.y - rhs.y,
+}
+            </pre><p>However, this feature is pretty incomplete, since we do not support overloading of functions yet. You can define only one operator overloading for all the structs.</p><h2 id="Time">Time measurement resolution</h2>Due to security reasons, your browser may have reduced time resolution for measurement. It is typically 0.1ms or 1ms, but can be larger. Please be aware that the lower digits may be always 0 because of this rounding. See <a href="https://developer.mozilla.org/en-US/docs/Web/API/Performance/now#reduced_time_precision">this page</a> for details.</div><hr><p>Source on <a href="https://github.com/msakuta/wascal">GitHub</a>.</p><script src="index.js"></script></body></html>
