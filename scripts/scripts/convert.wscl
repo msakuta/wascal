@@ -1,0 +1,1 @@
+pub let hello(x: i32) -> f64 = x as f64 * 1.5

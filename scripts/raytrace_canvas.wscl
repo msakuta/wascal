@@ -1,0 +1,128 @@
+
+struct Vec3 {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+let __add__(lhs: Vec3, rhs: Vec3) = Vec3 {
+    x: lhs.x + rhs.x,
+    y: lhs.y + rhs.y,
+    z: lhs.z + rhs.z,
+}
+
+let __sub__(lhs: Vec3, rhs: Vec3) = Vec3 {
+    x: lhs.x - rhs.x,
+    y: lhs.y - rhs.y,
+    z: lhs.z - rhs.z,
+}
+
+let neg(v: Vec3) = Vec3 { x: -v.x, y: -v.y, z: -v.z }
+
+let dot(lhs: Vec3, rhs: Vec3) -> f64 = lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z
+let length2(v: Vec3) -> f64 = dot(v, v)
+let normalize(v: Vec3) -> Vec3 = {
+    let leng: f64 = sqrt(length2(v));
+    Vec3 { x: v.x / leng, y: v.y / leng, z: v.z / leng }
+}
+let scale(v: Vec3, s: f64) -> Vec3 = Vec3 { x: v.x * s, y: v.y * s, z: v.z * s }
+
+let format_vec3(s: Vec3) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ", " + format_f64(s.z) + ")"
+
+let hit_sphere(obj: Vec3, radius: f64, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
+    let del = src - obj;
+
+    let b = dot(dir, del);
+
+    let dirslen = length2(dir);
+    let c = dirslen * (length2(del) - radius * radius);
+
+    let discrim = b * b - c;
+    if discrim > 0. {
+    } else {
+        return -1.;
+    };
+
+    let d = sqrt(discrim);
+
+    if 0. < dirslen {
+        let t0 = (-b - d) / dirslen;
+        let t1 = (-b + d) / dirslen;
+        if t1 < 0. {
+            -1.
+        } else {
+            t0
+        }
+    } else {
+        -1.
+    }
+}
+
+let hit_plane(obj: Vec3, normal: Vec3, src: Vec3, dir: Vec3, dt: f64) -> f64 = {
+    let delta = src - obj;
+    let dist = dot(delta, normal);
+    let ray_speed = dot(dir, normal);
+    if ray_speed < 0.000001 {
+        return -1.;
+    }
+    let t = -dist / ray_speed;
+    if t < 0. && dt < t {
+        -1.
+    } else {
+        t
+    }
+}
+
+let ground_color(hit_pos: Vec3, light: Vec3, sphere: Vec3, radius: f64) -> void = {
+    let hit_l = hit_sphere(sphere, radius, hit_pos, neg(light), 50.);
+    if 0. < hit_l {
+        set_fill_style(63, 95, 63);
+    } else {
+        set_fill_style(127, 191, 127);
+    }
+}
+
+pub let main() -> void = {
+    let ray_source = Vec3 { x: 0., y: 0., z: 0. };
+    let sphere = Vec3 { x: 0., y: 0., z: -8. };
+    let ground = Vec3 { x: 0., y: 2., z: 0. };
+    let ground_normal = Vec3 { x: 0., y: 1., z: 0.};
+    let light = normalize(Vec3 { x: 0.5, y: 1., z: -0.25 });
+    let radius: f64 = 5.;
+    let pixels: i32 = 40;
+    let width: i32 = 4;
+    let u8_max: f64 = 191.;
+    for y in -pixels to pixels {
+        let _: i32 = y;
+        for x in -pixels to pixels {
+
+            let ray = normalize(Vec3 { x: x as f64 / pixels as f64, y: y as f64 / pixels as f64, z: -1. });
+
+            let hit_s = hit_sphere(sphere, radius, ray_source, ray, 50.);
+
+            let hit_g = hit_plane(ground, ground_normal, ray_source, ray, 50.);
+
+            if 0. < hit_g && 0. < hit_s && hit_g < hit_s {
+                ground_color(scale(ray, hit_g), light, sphere, radius);
+            } else if 0. < hit_s {
+                let hit_pos = scale(ray, hit_s);
+                let normal = normalize(hit_pos - sphere);
+                let light_dot = dot(light, normal);
+                if light_dot < 0. {
+                    let light_neg = 1. + light_dot;
+                    let diffuse = 1. - light_neg * light_neg;
+                    let brightness = (diffuse * u8_max) as i32;
+                    set_fill_style(255, brightness, brightness);
+                } else {
+                    set_fill_style(63, 0, 0);
+                }
+            } else if 0. < hit_g {
+                ground_color(scale(ray, hit_g), light, sphere, radius);
+            } else {
+                set_fill_style(63, 127, 191 - y);
+            }
+
+            rectangle((x + pixels) * width, (y + pixels) * width, width, width);
+        }
+    }
+}

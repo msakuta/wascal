@@ -1,0 +1,32 @@
+
+// A 2D vector.
+struct Vec2 {
+    x: f64,
+    y: f64,
+}
+
+// Operator overloading for "+"
+let __add__(lhs: Vec2, rhs: Vec2) = Vec2 {
+    x: lhs.x + rhs.x,
+    y: lhs.y + rhs.y,
+}
+
+// Operator overloading for "-"
+let __sub__(lhs: Vec2, rhs: Vec2) = Vec2 {
+    x: lhs.x - rhs.x,
+    y: lhs.y - rhs.y,
+}
+
+let dot(lhs: Vec2, rhs: Vec2) = lhs.x * rhs.x + lhs.y * rhs.y
+
+/* String formatting of a vector. */
+let format_vec2(s: Vec2) -> str = "(" + format_f64(s.x) + ", " + format_f64(s.y) + ")"
+
+pub let main() -> f64 = {
+    let vec = Vec2 { x: 1., y: 2. };
+    let vec2 = Vec2 { x: 3., y: 4. };
+    print("add: " + format_vec2(vec + vec2));
+    let vec3 = vec - vec2;
+    print("sub: " + format_vec2(vec3));
+    dot(vec, vec3)
+}

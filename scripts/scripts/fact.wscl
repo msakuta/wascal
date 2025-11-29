@@ -1,0 +1,5 @@
+pub let fact(x: i32) = if x < 2 {
+    1
+} else {
+    fact(x - 1) * x
+}

@@ -1,0 +1,9 @@
+
+struct A {
+    int: i32,
+}
+
+pub let main() -> i32 = {
+    let a = A { int: 42 };
+    a.int
+}

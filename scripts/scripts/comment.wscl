@@ -1,0 +1,7 @@
+/* This is a block comment.
+   You can put as many lines as you want.
+   They are all treated as a white space. */
+
+// comment
+pub let hello(x: i32, y: i32) = // can be 
+    x * 10 + y //anywhere
