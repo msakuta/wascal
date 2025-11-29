@@ -341,14 +341,27 @@ fn factor(i: &str) -> Result<(&str, Expression), String> {
     postfix_expr(Expression::Variable(name), r)
 }
 
+fn pipe(i: &str) -> Result<(&str, Expression), String> {
+    let (r, mut ex) = factor(i)?;
+
+    let mut r = space(r);
+
+    while r.starts_with("|>") {
+        let (next_f, fname) = identifier(space(&r[2..]))?;
+        r = space(next_f);
+        ex = Expression::FnInvoke(fname, vec![ex]);
+    }
+    Ok((r, ex))
+}
+
 fn mul(i: &str) -> Result<(&str, Expression), String> {
-    let (r, mut lhs) = factor(i)?;
+    let (r, mut lhs) = pipe(i)?;
 
     let mut r = space(r);
 
     while 1 <= r.len() && matches!(&r[..1], "*" | "/") {
         let op = &r[..1];
-        let (next_r, rhs) = factor(&r[1..])?;
+        let (next_r, rhs) = pipe(&r[1..])?;
         r = space(next_r);
         lhs = if op == "*" {
             Expression::Mul(Box::new(lhs), Box::new(rhs))

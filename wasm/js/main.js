@@ -161,6 +161,7 @@ const samples = document.getElementById("samples");
     "mandel.wscl",
     "canvas.wscl", "mandel_canvas.wscl",
     "raytrace.wscl", "raytrace_canvas.wscl",
+    "pipe.wscl",
 ]
     .forEach(fileName => {
     const link = document.createElement("a");

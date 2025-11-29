@@ -1,0 +1,9 @@
+
+let add2(n: i64) -> i64 = n + 2
+
+let mult10(n: i64) -> i64 = n * 10
+
+pub let main() = mult10(add2(10))
+pub let main2() = 10 |> add2 |> mult10
+pub let main3() = add2(mult10(10))
+pub let main4() = 10 |> mult10 |> add2
