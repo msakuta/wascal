@@ -166,19 +166,22 @@ const samples = document.getElementById("samples");
     .forEach(fileName => {
     const link = document.createElement("a");
     link.href = "#";
-    link.addEventListener("click", async () => {
-        const file = await fetch("scripts/" + fileName);
-        const text = await file.text();
-        let size = view.state.doc.length;
-        const trans = view.state.update(
-            {changes: {from: 0, to: size}, sequential: true},
-            {changes: {from: 0, insert: text}, sequential: true});
-        view.dispatch(trans);
-    });
+    link.addEventListener("click", () => loadScript(fileName));
     link.innerHTML = fileName;
     samples.appendChild(link);
     samples.append(" ");
 })
+
+async function loadScript(fileName) {
+    const file = await fetch("scripts/" + fileName);
+    const text = await file.text();
+    let size = view.state.doc.length;
+    const trans = view.state.update(
+        {changes: {from: 0, to: size}, sequential: true},
+        {changes: {from: 0, insert: text}, sequential: true});
+    view.dispatch(trans);
+    location.hash = `#${fileName}`;
+}
 
 let initState = EditorState.create({
     extensions: [basicSetup, StreamLanguage.define(Parser)],
@@ -189,3 +192,10 @@ let view = new EditorView({
     state: initState,
     parent: document.getElementById("highlighting"),
 })
+
+// If we wait the page to load by window.addEventListener('load'), we can miss the event since this code
+// itself is asynchronously loaded. In other words, it does not have to wait for the page load.
+if (location.hash.length !== 0) {
+    const fileName = location.hash.substring(1);
+    loadScript(fileName);
+}
